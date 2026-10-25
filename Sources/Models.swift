@@ -42,15 +42,19 @@ enum Transport: String, Codable {
 
 /// 设备类型，决定图标
 enum DeviceKind: String, Codable {
-    case keyboard, mouse, headset, trackpad, gamepad, speaker, other
+    case keyboard, mouse, headset, trackpad, gamepad, speaker, microphone, other
 
     static func infer(from name: String, usage: Int? = nil) -> DeviceKind {
         let n = name.lowercased()
-        if n.contains("keyboard") || n.contains("键盘") || n.contains("keys") { return .keyboard }
-        if n.contains("mouse") || n.contains("鼠标") || n.contains("triathlon") { return .mouse }
+        if n.contains("keyboard") || n.contains("键盘") || n.contains("keys") ||
+            n.contains("a99") || n.contains("xinmeng") || n.contains("新盟") { return .keyboard }
+        if n.contains("mouse") || n.contains("鼠标") || n.contains("triathlon") ||
+            n.contains("inphic") || n.contains("in9") { return .mouse }
         if n.contains("headset") || n.contains("headphone") || n.contains("airpods") ||
             n.contains("earphone") || n.contains("耳机") || n.contains("buds") ||
             n.contains("beats") || n.contains("freelace") || n.contains("haylou") { return .headset }
+        if n.contains("dji mic") || n.contains("mic mini") || n.contains("microphone") ||
+            n.contains("麦克风") { return .microphone }
         if n.contains("trackpad") || n.contains("触控板") { return .trackpad }
         if n.contains("gamepad") || n.contains("controller") { return .gamepad }
         if n.contains("speaker") || n.contains("音箱") { return .speaker }
@@ -73,6 +77,8 @@ enum BatterySource: String, Codable {
     case bleGATT = "BLE 电池服务"
     /// IOBluetooth 私有属性（batteryPercentSingle 等），macOS 设置里的耳机电量就来自这里
     case ioBluetooth = "蓝牙上报"
+    /// 厂商私有 HID 协议（新盟 2.4G 接收器等）
+    case vendorHID = "厂商协议"
     case none = "未上报"
 }
 
@@ -163,7 +169,8 @@ struct DeviceBattery: Identifiable, Equatable {
         case .trackpad: rank = 3
         case .gamepad: rank = 4
         case .speaker: rank = 5
-        case .other: rank = 6
+        case .microphone: rank = 6
+        case .other: rank = 7
         }
         return (rank, name)
     }

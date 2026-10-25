@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/polychromate/PowerMeter)](https://github.com/polychromate/PowerMeter/releases)
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-blue)](https://github.com/polychromate/PowerMeter)
 
-**版本 0.2.0** · 2026-10-25
+**版本 0.3.0** · 2026-10-25
 
 菜单栏小工具，实时显示罗技键鼠、蓝牙耳机的电量。本地运行，不联网、不上传任何数据。
 
@@ -13,7 +13,7 @@
 
 不想自己编译？到 [Releases](https://github.com/polychromate/PowerMeter/releases) 下载最新的 `PowerMeter-x.y.z.zip`，解压后把 `PowerMeter.app` 拖进「应用程序」即可。
 
-应用为本地 ad-hoc 签名（无开发者证书），首次打开若提示「无法验证开发者」：
+应用为自签名证书签名（`PowerMeter Dev`，无 Apple 开发者账号、未公证），首次打开若提示「无法验证开发者」：
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/PowerMeter.app
@@ -26,6 +26,10 @@ xattr -dr com.apple.quarantine /Applications/PowerMeter.app
 | Logitech MX Keys | Unifying USB 接收器 | ✅ 可读 + ⚡充电状态（实测 0%，充电中） | HID++ 2.0 `0x1000` |
 | Logitech M720 Triathlon | Unifying USB 接收器 | ✅ 可读（实测 50%） | HID++ 2.0 `0x1000` |
 | HAYLOU S35 ANC | 经典蓝牙（HFP/A2DP） | ✅ 可读（实测 90%，与系统设置一致） | IOBluetooth `batteryPercentSingle` |
+| 新盟 A99 键盘 | 2.4G USB 接收器（0x3554:FA09） | ✅ 可读（实测 1%→100%，充电状态准确） | 厂商私有协议 `0x13` |
+| Robin's Earphones | 经典蓝牙（HFP） | ✅ 可读（实测 50–60%） | IOBluetooth `batteryPercentSingle` |
+| DJI Mic Mini | 经典蓝牙（HFP） | ✅ 可读（实测 50–60%，偶发单轮 0 读数下一轮恢复） | IOBluetooth `batteryPercentSingle` |
+| 英菲克 IN9 鼠标 | 2.4G USB 接收器（0x248A:5B2F） | ❌ 接收器不暴露电量（feature/input 报文全无响应），切蓝牙模式可试 | — |
 
 > 悬浮任意一行可看到原始通道信息，例如 `HID++ 0x1000 · 充电中`。
 
@@ -54,6 +58,7 @@ cp -R build/PowerMeter.app /Applications/
 - 菜单栏优先显示**未充电的锂电池设备**的电量，可更换电池设备不抢位置
 - 未充电的锂电池设备电量 < 15% 时，菜单栏数字变红，面板顶部出现红色提醒条
 - 正在充电的设备显示蓝色电量条 + 「⚡充电」标签，图标右下角带闪电徽标
+- 数据源运行状态提示（如某通道未就绪）收纳在「关于」弹层里，主面板保持干净
 
 ## 电池类型标签
 
@@ -98,9 +103,15 @@ cp -R build/PowerMeter.app /Applications/
 首次启动会请求「蓝牙」权限（`系统设置 › 隐私与安全性 › 蓝牙`），用于 BLE 电池服务扫描和耳机连接状态。
 HID++ 读取罗技接收器不需要额外授权。
 
-## 五路数据来源
+**「输入监控」权限**（连接新盟等 2.4G 接收器键盘时需要）：macOS 对 GUI App 打开 HID 设备
+强制要求该权限（`IOHIDManagerOpen` 返回 `0xE00002E2 kIOReturnNotPermitted`），且系统不会
+自动弹窗。App 检测到需要时会调用 `IOHIDRequestAccess` 触发授权请求；若弹窗被拒，请到
+`系统设置 › 隐私与安全性 › 输入监控` 手动启用 PowerMeter 后重启 App。命令行运行
+`--dump` 不受此限制（继承终端的权限）。
 
-程序按精度从高到低聚合五类通道，同一设备自动合并去重：
+## 六路数据来源
+
+程序按精度从高到低聚合六类通道，同一设备自动合并去重：
 
 1. **罗技 HID++ 2.0**（`Sources/LogitechHIDPP.swift`）
    直接与 Unifying / Bolt 接收器或蓝牙直连的罗技外设对话，按 `getFeature` 解析
@@ -119,6 +130,11 @@ HID++ 读取罗技接收器不需要额外授权。
    第三方便携耳机电量的来源**，`system_profiler` 并不导出这些值。
 5. **BLE 电池服务**（`Sources/BLEScanner.swift`）
    扫描 GATT `0x180F` 服务并读取 `0x2A19`，覆盖支持 BLE 电量上报的耳机与鼠标。
+6. **厂商私有协议**（`Sources/XinmengHID.swift`）
+   新盟（Xinmeng）2.4G 接收器（VID 0x3554，A99 / M71 等共用）通过 vendor 接口的
+   Input Report `0x13` 主动上报电量（`report[6]` = 百分比，`report[7]` 的 0x10/0x11
+   表示充电中）。协议逆向自 Linux 内核 `drivers/hid/hid-xinmeng.c` 并经实机验证。
+   注意：接收器不响应任何主动查询（`GetFeature` 返回全零），只能常驻监听。
 
 ## 关于耳机（HAYLOU S35 ANC）
 
@@ -193,6 +209,30 @@ git checkout v0.1.0            # 回到 0.1.0 的完整工程（含当时的 REA
 和 `PowerMeter-<版本>-source.zip`（该版本 tag 的完整源码，含 README）。
 
 ## 版本历史
+
+### 0.3.0 — 2026-10-25
+
+- 新增设备适配：新盟 A99 键盘（内置锂电）、英菲克 IN9 鼠标（内置 500mAh 锂电）、
+  DJI Mic Mini 无线麦克风（发射器内置 114mAh 锂电，蓝牙直连 Mac 时可识别）、
+  Robin's earphone 蓝牙耳机（HFP 上报电量，走 IOBluetooth 通道）
+- 新增第六路数据源「厂商私有协议」（`Sources/XinmengHID.swift`）：新盟 2.4G 接收器
+  （VID 0x3554:FA09）的电量经 vendor 接口 Input Report `0x13` 上报，协议逆向自
+  Linux 内核 hid-xinmeng 驱动；实机验证读数正确（含充电状态）。报文带校验和验证，
+  键盘休眠时发出的 0% 占位报文会被忽略（保留最后一次有效读数）。首次使用需在
+  「系统设置 › 隐私与安全性 › 输入监控」允许 PowerMeter。键盘闲置休眠期间不发
+  报文，敲键唤醒后 30 秒内恢复更新
+- 英菲克 IN9 实测结论：2.4G 接收器（0x248A:5B2F）不向系统暴露任何电量通道
+  （无 HID BatteryPercent、feature/input 报文均无响应），仅蓝牙模式可尝试读取
+- 新增 `microphone` 设备类型：面板显示麦克风图标，排序位于音箱之后
+- 设备名识别支持「新盟 / Xinmeng / A99」「英菲克 / inphic / IN9」「DJI Mic / Mic Mini」等
+  命名变体；多来源同名设备（带 / 不带品牌前缀）合并更稳
+- 电池类型库新增上述型号，低电量提醒（<15% 变红）对这几台设备同样生效
+- 运行时快照新增 `notes` 段，便于排查权限 / 数据源问题
+- 数据源提示从主面板底部移入「关于」弹层（「运行状态」段），主面板只显示设备
+- 蓝牙电量毛刺修复：上报过的设备偶发读到全 0（HFP 抖动）不再显示 0% 并触发
+  低电量告警，改为沿用最近一次有效读数并标记数据延迟
+- 构建脚本改为优先使用本地自签证书「PowerMeter Dev」签名（无证书环境自动退回
+  ad-hoc）；固定签名身份使「输入监控」等 TCC 授权在重新编译后依然有效
 
 ### 0.2.0 — 2026-10-25
 

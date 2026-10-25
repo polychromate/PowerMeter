@@ -17,10 +17,6 @@ struct ContentView: View {
                 Divider()
             }
             content
-            if !store.notes.isEmpty {
-                Divider()
-                notesView
-            }
             Divider()
             footer
         }
@@ -113,28 +109,6 @@ struct ContentView: View {
         .padding(.horizontal, 8)
     }
 
-    // MARK: - 提示区
-
-    private var notesView: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(store.notes, id: \.self) { note in
-                HStack(alignment: .top, spacing: 5) {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 1)
-                    Text(note)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-    }
-
     // MARK: - 底部
 
     private var footer: some View {
@@ -148,7 +122,7 @@ struct ContentView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .popover(isPresented: $showAbout, arrowEdge: .bottom) {
-                    AboutView()
+                    AboutView(notes: store.notes)
                 }
             Button("退出") { NSApp.terminate(nil) }
                 .buttonStyle(.plain)
@@ -225,6 +199,7 @@ struct DeviceRow: View {
         case .hidProperty: return "HID 属性"
         case .bleGATT: return "BLE 电池服务"
         case .ioBluetooth: return "蓝牙上报"
+        case .vendorHID: return "厂商私有协议"
         case .none: return "该设备未向系统提供电量"
         }
     }
@@ -281,6 +256,7 @@ struct DeviceRow: View {
         case .trackpad: return "rectangle.and.hand.point.up.left"
         case .gamepad: return "gamecontroller"
         case .speaker: return "hifispeaker"
+        case .microphone: return "mic.fill"
         case .other: return "dot.radiowaves.left.and.right"
         }
     }
@@ -382,6 +358,9 @@ extension BatteryLevelStyle {
 // MARK: - 关于
 
 struct AboutView: View {
+    /// 数据源运行状态提示（正常时为空）
+    var notes: [String] = []
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
@@ -407,9 +386,32 @@ struct AboutView: View {
             Divider()
             Text("数据来源")
                 .font(.system(size: 11, weight: .medium))
-            Text("· 罗技 HID++（接收器 / 蓝牙直连）\n· 系统蓝牙上报（AirPods 等）\n· HID 属性 BatteryPercent\n· IOBluetooth 私有电量（第三方耳机）\n· BLE 电池服务 0x180F")
+            Text("· 罗技 HID++（接收器 / 蓝牙直连）\n· 系统蓝牙上报（AirPods 等）\n· HID 属性 BatteryPercent\n· IOBluetooth 私有电量（第三方耳机）\n· BLE 电池服务 0x180F\n· 厂商私有协议（新盟 2.4G 接收器）")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
+            Divider()
+            Text("运行状态")
+                .font(.system(size: 11, weight: .medium))
+            if notes.isEmpty {
+                Text("所有数据源工作正常")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(notes, id: \.self) { note in
+                        HStack(alignment: .top, spacing: 5) {
+                            Image(systemName: "info.circle")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 1)
+                            Text(note)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
             Divider()
             Text("设备不上报电量时，本工具无法凭空读取，\n界面会明确标注「电量未知」。")
                 .font(.system(size: 10))

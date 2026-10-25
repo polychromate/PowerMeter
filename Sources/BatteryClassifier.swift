@@ -50,6 +50,14 @@ enum BatteryClassifier {
         Rule(pattern: "soundcore", chemistry: .lithium, reason: "Soundcore 耳机为内置锂电"),
         Rule(pattern: "freebuds", chemistry: .lithium, reason: "FreeBuds 为内置锂电"),
         Rule(pattern: "jabra", chemistry: .lithium, reason: "Jabra 耳机为内置锂电"),
+        Rule(pattern: "a99", chemistry: .lithium, reason: "新盟 A99 为三模键盘，内置锂电"),
+        Rule(pattern: "xinmeng", chemistry: .lithium, reason: "新盟无线键盘均为内置锂电"),
+        Rule(pattern: "新盟", chemistry: .lithium, reason: "新盟无线键盘均为内置锂电"),
+        Rule(pattern: "inphic", chemistry: .lithium, reason: "英菲克 IN9 内置 500mAh 锂电"),
+        Rule(pattern: "in9", chemistry: .lithium, reason: "英菲克 IN9 内置 500mAh 锂电"),
+        Rule(pattern: "dji mic", chemistry: .lithium, reason: "DJI Mic Mini 发射器为内置锂电（114mAh）"),
+        Rule(pattern: "mic mini", chemistry: .lithium, reason: "DJI Mic Mini 发射器为内置锂电（114mAh）"),
+        Rule(pattern: "robin", chemistry: .lithium, reason: "蓝牙耳机为内置锂电"),
 
         // ---------- 可更换电池（AA / AAA） ----------
         Rule(pattern: "m720", chemistry: .replaceable, reason: "M720 Triathlon 使用 1×AA 电池"),
@@ -107,6 +115,8 @@ enum BatteryClassifier {
         switch device.kind {
         case .headset:
             return Verdict(chemistry: .lithium, reason: "蓝牙耳机基本都内置锂电")
+        case .microphone:
+            return Verdict(chemistry: .lithium, reason: "无线麦克风均为内置锂电")
         case .trackpad:
             return Verdict(chemistry: .lithium, reason: "触控板基本都内置锂电")
         default:

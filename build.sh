@@ -46,8 +46,14 @@ if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-echo "==> 临时签名"
-codesign --force --deep --sign - "$APP" 2>/dev/null || echo "（签名失败，通常仍可运行）"
+echo "==> 签名"
+# 优先用本地自签证书「PowerMeter Dev」：TCC 授权（输入监控等）绑定固定签名身份，
+# 重新编译后无需重新授权；证书不存在时退回 ad-hoc 签名（每次编译后需重新授权）
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "PowerMeter Dev"; then
+  codesign --force --deep --sign "PowerMeter Dev" "$APP"
+else
+  codesign --force --deep --sign - "$APP"
+fi
 
 echo ""
 echo "构建完成：$APP"

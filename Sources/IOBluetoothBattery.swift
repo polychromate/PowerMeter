@@ -83,7 +83,10 @@ enum IOBluetoothBatteryScanner {
                 let known = knownReporting.contains(address)
                 lock.unlock()
                 if known {
-                    level = 0
+                    // 上报过的设备偶发读到全 0（HFP 毛刺 / 瞬时掉线），
+                    // 不置 0 以免误触低电量告警；返回 nil 由上层沿用缓存读数并标 stale。
+                    // 真实耗尽的设备几分钟后缓存过期，会回到「电量未知」。
+                    level = nil
                 } else {
                     continue
                 }

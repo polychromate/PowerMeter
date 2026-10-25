@@ -10,6 +10,7 @@ final class DeviceStore: ObservableObject {
     @Published private(set) var notes: [String] = []
 
     private let logitech = LogitechProvider()
+    private let xinmeng = XinmengProvider()
     private var refreshTimer: Timer?
     private var lastBLEScan: Date?
 
@@ -18,6 +19,7 @@ final class DeviceStore: ObservableObject {
     private var bluetoothDevices: [DeviceBattery] = []
     private var hidDevices: [DeviceBattery] = []
     private var ioBluetoothDevices: [DeviceBattery] = []
+    private var vendorDevices: [DeviceBattery] = []
 
     // 上次有效电量缓存：devices 睡眠或暂时读不到时沿用，避免界面跳动
     private var cache: [String: (level: Int, charging: Bool, date: Date)] = [:]
@@ -103,6 +105,17 @@ final class DeviceStore: ObservableObject {
             }
         }
 
+        // 3.6 新盟 2.4G 接收器（厂商私有协议，被动监听 input report 0x13）
+        pendingTasks += 1
+        xinmeng.snapshot { [weak self] devices, status in
+            guard let self = self else { return }
+            Task { @MainActor in
+                self.vendorDevices = devices
+                if let status = status { self.notes.append("新盟接收器：\(status)") }
+                self.finishTask()
+            }
+        }
+
         // 4. BLE 电池服务（每 5 分钟扫一次，避免耗电）
         if bleEnabled, lastBLEScan == nil || Date().timeIntervalSince(lastBLEScan!) > 300 {
             lastBLEScan = Date()
@@ -120,7 +133,7 @@ final class DeviceStore: ObservableObject {
     }
 
     private func rebuild() {
-        var all = logitechDevices + hidDevices + bluetoothDevices + ioBluetoothDevices
+        var all = logitechDevices + hidDevices + bluetoothDevices + ioBluetoothDevices + vendorDevices
         if bleEnabled {
             all += BLEScanner.shared.snapshot()
             if let status = BLEScanner.shared.statusText {
@@ -149,10 +162,11 @@ final class DeviceStore: ObservableObject {
         let priority: [BatterySource: Int] = [
             .logitechHIDPP: 0,
             .hidProperty: 1,
-            .bleGATT: 2,
-            .ioBluetooth: 3,
-            .systemProfiler: 4,
-            .none: 5
+            .vendorHID: 2,
+            .bleGATT: 3,
+            .ioBluetooth: 4,
+            .systemProfiler: 5,
+            .none: 6
         ]
 
         var merged: [DeviceBattery] = []
@@ -202,7 +216,8 @@ final class DeviceStore: ObservableObject {
 
     private func normalize(_ name: String) -> String {
         var text = name.lowercased()
-        for noise in [" wireless", " multi-device", " multi device", " triathlon"] {
+        for noise in [" wireless", " multi-device", " multi device", " triathlon",
+                      "inphic ", "xinmeng ", "新盟"] {
             text = text.replacingOccurrences(of: noise, with: "")
         }
         return text.trimmingCharacters(in: .whitespaces)
@@ -225,6 +240,7 @@ final class DeviceStore: ObservableObject {
         }
         let payload: [String: Any] = [
             "updated": ISO8601DateFormatter().string(from: Date()),
+            "notes": notes,
             "menuBar": [
                 "device": devices.menuBarCandidate?.name ?? "",
                 "level": devices.menuBarCandidate?.level as Any,

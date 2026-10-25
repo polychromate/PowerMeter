@@ -16,9 +16,16 @@ enum DumpMode {
         report(title: "通用 HID 属性（BatteryPercent）", devices: hid)
 
         let logitech = LogitechProvider()
-        var remaining = 2
+        let xinmeng = XinmengProvider()
+        var remaining = 3
         logitech.snapshot { devices, fatal in
             report(title: "罗技 HID++（接收器 / 直连）", devices: devices, extra: fatal)
+            remaining -= 1
+            if remaining == 0 { done = true }
+        }
+
+        xinmeng.snapshot { devices, status in
+            report(title: "厂商协议（新盟 2.4G 接收器 0x3554）", devices: devices, extra: status)
             remaining -= 1
             if remaining == 0 { done = true }
         }
