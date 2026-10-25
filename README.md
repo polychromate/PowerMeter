@@ -1,10 +1,23 @@
 # PowerMeter · Mac 外设电量监视器
 
+[![Release](https://img.shields.io/github/v/release/polychromate/PowerMeter)](https://github.com/polychromate/PowerMeter/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-blue)](https://github.com/polychromate/PowerMeter)
+
 **版本 0.2.0** · 2026-10-25
 
 菜单栏小工具，实时显示罗技键鼠、蓝牙耳机的电量。本地运行，不联网、不上传任何数据。
 
 ![界面](Resources/screenshot.png)
+
+## 下载
+
+不想自己编译？到 [Releases](https://github.com/polychromate/PowerMeter/releases) 下载最新的 `PowerMeter-x.y.z.zip`，解压后把 `PowerMeter.app` 拖进「应用程序」即可。
+
+应用为本地 ad-hoc 签名（无开发者证书），首次打开若提示「无法验证开发者」：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/PowerMeter.app
+```
 
 ## 当前实测结果（本机 macOS 26.6.2）
 
@@ -16,13 +29,16 @@
 
 > 悬浮任意一行可看到原始通道信息，例如 `HID++ 0x1000 · 充电中`。
 
-## 运行
+## 从源码构建
 
 ```bash
+git clone https://github.com/polychromate/PowerMeter.git
 cd PowerMeter
 ./build.sh              # 编译，产物在 build/PowerMeter.app
 open build/PowerMeter.app
 ```
+
+需要 Xcode Command Line Tools（`xcode-select --install`），不依赖完整 Xcode。
 
 装到「应用程序」以便长期使用：
 
