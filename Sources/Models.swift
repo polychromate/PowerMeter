@@ -1,5 +1,26 @@
 import Foundation
 
+/// 应用版本（与 Info.plist 保持同源）
+enum AppVersion {
+    static var text: String {
+        if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+           !version.isEmpty {
+            return version
+        }
+        // 直接在 bundle 里执行二进制（--dump / --snapshot）时，Bundle.main 未必是 .app
+        var url = URL(fileURLWithPath: CommandLine.arguments.first ?? "").resolvingSymlinksInPath()
+        for _ in 0..<4 {
+            url.deleteLastPathComponent()
+            let plist = url.appendingPathComponent("Contents/Info.plist")
+            if let dict = NSDictionary(contentsOf: plist),
+               let version = dict["CFBundleShortVersionString"] as? String {
+                return version
+            }
+        }
+        return "dev"
+    }
+}
+
 /// 设备与 Mac 的连接方式
 enum Transport: String, Codable {
     case logitechReceiver = "USB 接收器"
@@ -55,6 +76,30 @@ enum BatterySource: String, Codable {
     case none = "未上报"
 }
 
+/// 电池类型：内置锂电（可充电） vs 可更换电池（AA/AAA/纽扣）
+enum BatteryChemistry: String, Codable, CaseIterable {
+    case lithium
+    case replaceable
+    case unknown
+
+    /// 界面上的标签文案；unknown 不显示标签，避免制造无根据的结论
+    var tag: String? {
+        switch self {
+        case .lithium: return "锂电池"
+        case .replaceable: return "换电池"
+        case .unknown: return nil
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .lithium: return "内置锂电，需要充电"
+        case .replaceable: return "可更换电池，电量耗尽后换新电池"
+        case .unknown: return "类型未知"
+        }
+    }
+}
+
 struct DeviceBattery: Identifiable, Equatable {
     var id: String
     var name: String
@@ -71,6 +116,19 @@ struct DeviceBattery: Identifiable, Equatable {
     /// true 表示本次刷新没读到，显示的是上一次的有效值
     var stale: Bool = false
     var extra: [String: String] = [:]
+
+    /// 电池类型与判定依据（依据显示在悬浮提示里，方便纠正误判）
+    var chemistry: BatteryChemistry = .unknown
+    var chemistryReason: String = ""
+
+    /// 低电量提醒阈值：未充电的锂电池设备低于此值即视为需要充电
+    static let lowBatteryThreshold = 15
+
+    /// 是否需要立刻充电：锂电池 + 未充电 + 电量低于阈值
+    var isCritical: Bool {
+        guard chemistry == .lithium, !charging, let level = level else { return false }
+        return level < DeviceBattery.lowBatteryThreshold
+    }
 
     /// 精简显示名：去掉「Wireless Keyboard」这类冗余后缀，完整名在提示中可见
     var displayName: String {
@@ -119,5 +177,29 @@ extension Array where Element == DeviceBattery {
     /// 用于菜单栏展示：有读数设备中的最低电量
     var lowestKnownLevel: Int? {
         compactMap { $0.level }.min()
+    }
+
+    /// 菜单栏优先展示的设备。
+    ///
+    /// 优先级：未充电的锂电池设备 → 充电中的锂电池设备 → 其它有读数的设备；
+    /// 同一层级取电量最低的一台（电量相同按设备类型排序，保证顺序稳定）。
+    /// 可更换电池设备（AA/AAA）没电只是换节电池，不该抢占菜单栏位置。
+    var menuBarCandidate: DeviceBattery? {
+        let known = filter { $0.level != nil }
+        guard !known.isEmpty else { return nil }
+        let tiers: [[DeviceBattery]] = [
+            known.filter { $0.chemistry == .lithium && !$0.charging },
+            known.filter { $0.chemistry == .lithium },
+            known
+        ]
+        for tier in tiers where !tier.isEmpty {
+            if let best = tier.min(by: { a, b in
+                if a.level != b.level { return (a.level ?? 100) < (b.level ?? 100) }
+                return a.sortKey < b.sortKey
+            }) {
+                return best
+            }
+        }
+        return nil
     }
 }

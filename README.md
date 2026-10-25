@@ -1,6 +1,6 @@
 # PowerMeter · Mac 外设电量监视器
 
-**版本 0.1.0** · 2026-10-25 · 首个可用版本
+**版本 0.2.0** · 2026-10-25
 
 菜单栏小工具，实时显示罗技键鼠、蓝牙耳机的电量。本地运行，不联网、不上传任何数据。
 
@@ -30,12 +30,52 @@ open build/PowerMeter.app
 cp -R build/PowerMeter.app /Applications/
 ```
 
-启动后没有 Dock 图标，只在菜单栏出现电量图标（显示当前最低电量）。点击图标展开面板。
+启动后没有 Dock 图标，只在菜单栏出现电量图标（显示当前最需要关注的那台设备的电量）。点击图标展开面板。
 
 - 每 60 秒自动刷新，点击面板右上角可手动刷新
-- 鼠标悬停某一行可看到数据来源、协议细节
-- 任意设备低于 15% 时，菜单栏图标变红
+- 鼠标悬停某一行可看到电池类型判定依据、数据来源、协议细节
+- 每台设备带电池类型标签：`锂电池`（内置可充电）或 `换电池`（AA/AAA）
+- 菜单栏优先显示**未充电的锂电池设备**的电量，可更换电池设备不抢位置
+- 未充电的锂电池设备电量 < 15% 时，菜单栏数字变红，面板顶部出现红色提醒条
 - 正在充电的设备显示蓝色电量条 + 「⚡充电」标签，图标右下角带闪电徽标
+
+## 电池类型标签
+
+| 标签 | 含义 | 电量低时该做什么 |
+| --- | --- | --- |
+| `锂电池` | 内置可充电锂电（MX Keys、HAYLOU、妙控系列…） | 插线充电 |
+| `换电池` | 使用 AA / AAA 电池（M720 Triathlon、K380、M185…） | 换一节新电池 |
+| 无标签 | 判断不出来（型号不在已知库，也没观察到充电） | — |
+
+判定顺序（`Sources/BatteryClassifier.swift`，可靠性从高到低）：
+
+1. `~/Library/Application Support/PowerMeter/battery-types.json` 手动指定；
+2. 观察到充电状态 → 锂电池（只有可充电电池才会报 charging）；
+3. 罗技 `0x1001` 电压读数 → ≤3.3V 判为 AA/AAA，≥3.4V 判为单节锂电；
+4. 已知型号库（MX Keys / MX Master / 妙控系列 / AirPods / M720 / K380 …）；
+5. 类型兜底：耳机、触控板基本都是内置锂电。
+
+判断不出来就不显示标签 —— 宁可不说，也不给错信息。型号不在库里时可以自己指定：
+
+```json
+{ "m720": "replaceable", "mx keys": "lithium" }
+```
+
+写到 `~/Library/Application Support/PowerMeter/battery-types.json` 即可，键按小写子串匹配设备名（重启 App 生效）。
+
+## 菜单栏显示规则
+
+菜单栏只显示**一台**设备的电量，按下面的优先级挑选：
+
+1. 未充电的锂电池设备中电量最低的一台（最需要关注）；
+2. 若锂电池设备都在充电 → 显示充电中的锂电池设备；
+3. 若没有锂电池设备 → 显示其它有读数的设备。
+
+可更换电池的设备**不会抢占**菜单栏位置：AA 电池没电换一节就好，不需要你惦记。
+鼠标悬停菜单栏图标可以看到当前显示的是哪台设备、以及为什么选它。
+
+低电量提醒：未充电的**锂电池**设备电量 < 15% 时，菜单栏数字变红、面板顶部出现红色提醒条。
+正在充电的设备不触发提醒（充电中的 0% 不是异常）；可更换电池设备也不触发（换电池即可）。
 
 ## 权限
 
@@ -97,21 +137,24 @@ build/PowerMeter.app/Contents/MacOS/PowerMeter --snapshot out.png
 
 ```
 PowerMeter/
-├── build.sh                  # 一键编译打包（swiftc，无需 Xcode）
-├── Info.plist                # LSUIElement 菜单栏应用 + 蓝牙用途说明
+├── build.sh                  # 一键编译（swiftc，无需 Xcode）
+├── release.sh                # 编译 + 打包 app / 源码到 releases/
+├── Info.plist                # LSUIElement 菜单栏应用 + 蓝牙用途说明 + 版本号
 ├── Sources/
 │   ├── main.swift            # 入口，含 --dump / --snapshot 分支
-│   ├── AppDelegate.swift     # 状态栏图标、弹窗、单实例保护
-│   ├── Models.swift          # 设备模型、类型推断、电量配色
+│   ├── AppDelegate.swift     # 状态栏图标、菜单栏选机策略、弹窗、单实例保护
+│   ├── Models.swift          # 设备模型、电池类型枚举、低电量阈值
+│   ├── BatteryClassifier.swift  # 锂电池 / 换电池判定
 │   ├── LogitechHIDPP.swift   # HID++ 协议实现 + 后台线程会话
 │   ├── BluetoothBattery.swift
 │   ├── IOBluetoothBattery.swift # 第三方耳机电量（等同系统设置）
 │   ├── HIDBattery.swift
 │   ├── BLEScanner.swift
-│   ├── DeviceStore.swift     # 多源聚合、去重、缓存
+│   ├── DeviceStore.swift     # 多源聚合、去重、缓存、菜单栏候选
 │   ├── ContentView.swift     # SwiftUI 界面
 │   └── SnapshotMode.swift    # ImageRenderer 离屏截图
-└── Resources/                # 图标与截图
+├── Resources/                # 图标与截图
+└── releases/                 # 各版本的 app 包与源码包（不进 git）
 ```
 
 ## 说明
@@ -120,7 +163,28 @@ PowerMeter/
 - 编译使用系统自带 `swiftc`，产物为 arm64、ad-hoc 签名；不需要安装 Xcode
 - 设备休眠时读不到新值，会显示上一次的有效读数（电量条半透明）并在提示中说明
 
+## 版本与归档
+
+仓库用 git 打标签保存每个可用版本：
+
+```bash
+git tag -l                     # v0.1.0  v0.2.0
+git checkout v0.1.0            # 回到 0.1.0 的完整工程（含当时的 README）
+./release.sh                   # 当前版本编译 + 打包到 releases/
+```
+
+`releases/` 下每个版本有两个包：`PowerMeter-<版本>.zip`（可直接运行的 app）
+和 `PowerMeter-<版本>-source.zip`（该版本 tag 的完整源码，含 README）。
+
 ## 版本历史
+
+### 0.2.0 — 2026-10-25
+
+- 新增电池类型标签：`锂电池`（内置可充电）/ `换电池`（AA、AAA），依据型号库、充电状态、电压区间综合判定，判断不出就不打标签
+- 菜单栏改为「优先显示未充电的锂电池设备」，可更换电池设备不再抢占菜单栏位置
+- 未充电的锂电池设备电量 < 15% 时，菜单栏数字变红 + 面板顶部红色提醒条
+- 支持 `~/Library/Application Support/PowerMeter/battery-types.json` 手动指定电池类型
+- 运行时快照新增 `menuBar` 段，便于确认菜单栏当前选了哪台设备
 
 ### 0.1.0 — 2026-10-25
 

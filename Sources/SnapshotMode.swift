@@ -50,6 +50,8 @@ enum SnapshotData {
             let name: String
             let level: Int?
             let charging: Bool?
+            let chemistry: String?
+            let chemistryReason: String?
             let transport: String
             let source: String
             let detail: String?
@@ -79,7 +81,9 @@ enum SnapshotData {
                 source: BatterySource(rawValue: row.source) ?? .none,
                 detail: row.detail,
                 lastUpdate: Date(),
-                stale: row.stale ?? false
+                stale: row.stale ?? false,
+                chemistry: BatteryChemistry(rawValue: row.chemistry ?? "") ?? .unknown,
+                chemistryReason: row.chemistryReason ?? ""
             )
         }
     }

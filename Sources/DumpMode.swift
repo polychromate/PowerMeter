@@ -6,7 +6,7 @@ import AppKit
 enum DumpMode {
     static func run() {
         setvbuf(stdout, nil, _IOLBF, 0)
-        print("PowerMeter 诊断模式")
+        print("PowerMeter \(AppVersion.text) 诊断模式")
         print(String(repeating: "=", count: 56))
 
         var lines: [String] = []
@@ -59,8 +59,11 @@ enum DumpMode {
         for device in devices {
             let level = device.level.map { "\($0)%" } ?? "未知"
             let charge = device.charging ? "  ⚡充电中" : ""
-            print("  · \(device.name)  [\(device.transport.rawValue)]  \(level)\(charge)")
+            let verdict = BatteryClassifier.classify(device)
+            let tag = verdict.chemistry.tag.map { "  [\($0)]" } ?? "  [类型未知]"
+            print("  · \(device.name)  [\(device.transport.rawValue)]  \(level)\(charge)\(tag)")
             if let detail = device.detail { print("      \(detail)") }
+            print("      类型依据：\(verdict.reason)")
         }
     }
 }

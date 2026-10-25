@@ -142,6 +142,8 @@ final class HIDPPSession {
         var level: Int
         var charging: Bool
         var detail: String
+        /// 仅当读数来自 0x1001 电压路径时有值，用于判断电池类型
+        var voltageMillivolts: Int? = nil
     }
 
     private var transportLabel: String { isReceiver ? "接收器直读" : "蓝牙直读" }
@@ -214,7 +216,8 @@ final class HIDPPSession {
             // 0x1001 的第二个字节偶尔带充电标志（0x80 = 充电中）
             let flags = Int(report[6])
             return BatteryReading(level: percent, charging: (flags & 0x80) != 0,
-                                  detail: "\(millivolts) mV（电压换算）")
+                                  detail: "\(millivolts) mV（电压换算）",
+                                  voltageMillivolts: millivolts)
         }
         return nil
     }
@@ -231,6 +234,10 @@ final class HIDPPSession {
             let reading = battery(slot)
             let kind = DeviceKind.infer(from: name)
             let id = "logitech-\(isReceiver ? "receiver" : "direct")-\(slot)-\(name)"
+            var extra = ["协议": reading?.detail ?? "HID++"]
+            if let millivolts = reading?.voltageMillivolts {
+                extra["电压"] = "\(millivolts) mV"
+            }
             results.append(DeviceBattery(
                 id: id,
                 name: name,
@@ -244,7 +251,7 @@ final class HIDPPSession {
                     r.charging ? "\(transportLabel) · 充电中" : transportLabel
                 } ?? "已连接，本次未读到电量（设备休眠）",
                 lastUpdate: Date(),
-                extra: ["协议": reading?.detail ?? "HID++"]
+                extra: extra
             ))
         }
         return results

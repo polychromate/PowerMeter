@@ -39,7 +39,13 @@ final class DeviceStore: ObservableObject {
 
     /// 离屏渲染用：直接注入一份设备列表（数据来自最近一次真实扫描）
     func applyPreview(_ list: [DeviceBattery]) {
-        devices = list.sorted { $0.sortKey < $1.sortKey }
+        devices = list.map { device in
+            var copy = device
+            let verdict = BatteryClassifier.classify(copy)
+            copy.chemistry = verdict.chemistry
+            copy.chemistryReason = verdict.reason
+            return copy
+        }.sorted { $0.sortKey < $1.sortKey }
         lastRefresh = Date()
     }
 
@@ -184,6 +190,11 @@ final class DeviceStore: ObservableObject {
                 best.stale = true
             }
 
+            // 电池类型判定：放在缓存之后，保证用的是最终读数
+            let verdict = BatteryClassifier.classify(best)
+            best.chemistry = verdict.chemistry
+            best.chemistryReason = verdict.reason
+
             merged.append(best)
         }
         return merged
@@ -204,6 +215,8 @@ final class DeviceStore: ObservableObject {
                 "name": device.name,
                 "level": device.level as Any,
                 "charging": device.charging,
+                "chemistry": device.chemistry.rawValue,
+                "chemistryReason": device.chemistryReason,
                 "transport": device.transport.rawValue,
                 "source": device.source.rawValue,
                 "detail": device.detail ?? "",
@@ -212,6 +225,13 @@ final class DeviceStore: ObservableObject {
         }
         let payload: [String: Any] = [
             "updated": ISO8601DateFormatter().string(from: Date()),
+            "menuBar": [
+                "device": devices.menuBarCandidate?.name ?? "",
+                "level": devices.menuBarCandidate?.level as Any,
+                "chemistry": devices.menuBarCandidate?.chemistry.rawValue ?? "",
+                "charging": devices.menuBarCandidate?.charging ?? false,
+                "critical": devices.contains { $0.isCritical }
+            ],
             "devices": rows
         ]
         DispatchQueue.global(qos: .utility).async {
@@ -226,12 +246,25 @@ final class DeviceStore: ObservableObject {
 
     // MARK: - 菜单栏展示
 
-    var lowestLevel: Int? {
-        devices.compactMap { $0.level }.min()
+    /// 菜单栏展示的设备：优先「未充电的锂电池设备」中电量最低的一台，
+    /// 其次是充电中的锂电池设备，最后才轮到可更换电池设备。
+    var menuBarDevice: DeviceBattery? {
+        devices.menuBarCandidate
     }
 
-    var hasCriticalDevice: Bool {
-        devices.contains { ($0.level ?? 100) <= 15 && !$0.charging }
+    /// 需要提醒充电的设备：锂电池 + 未充电 + 电量低于阈值
+    var criticalDevices: [DeviceBattery] {
+        devices.filter { $0.isCritical }
+    }
+
+    var hasCriticalLithium: Bool {
+        !criticalDevices.isEmpty
+    }
+
+    var criticalMessage: String? {
+        guard let device = criticalDevices.min(by: { ($0.level ?? 0) < ($1.level ?? 0) }) else { return nil }
+        let suffix = criticalDevices.count > 1 ? " 等 \(criticalDevices.count) 台设备" : ""
+        return "\(device.displayName)\(suffix) 电量 \(device.levelText)，请及时充电"
     }
 
     var summaryLine: String {
@@ -240,6 +273,9 @@ final class DeviceStore: ObservableObject {
         if known.isEmpty { return "\(devices.count) 台设备 · 电量未知" }
         let total = known.reduce(0) { $0 + ($1.level ?? 0) }
         let average = total / max(known.count, 1)
-        return "\(devices.count) 台设备 · 平均 \(average)%"
+        var parts = ["\(devices.count) 台设备", "平均 \(average)%"]
+        let charging = devices.filter { $0.charging }.count
+        if charging > 0 { parts.append("\(charging) 台充电中") }
+        return parts.joined(separator: " · ")
     }
 }

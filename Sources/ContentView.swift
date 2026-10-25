@@ -12,6 +12,10 @@ struct ContentView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if let message = store.criticalMessage {
+                criticalBanner(message)
+                Divider()
+            }
             content
             if !store.notes.isEmpty {
                 Divider()
@@ -57,6 +61,23 @@ struct ContentView: View {
     }
 
     // MARK: - 正文
+
+    /// 未充电的锂电池设备电量过低时的提醒条
+    private func criticalBanner(_ message: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10, weight: .semibold))
+            Text(message)
+                .font(.system(size: 10.5, weight: .medium))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(DeviceRow.criticalTint)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DeviceRow.criticalTint.opacity(0.10))
+    }
 
     private var content: some View {
         Group {
@@ -118,7 +139,7 @@ struct ContentView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Text(lastUpdateText)
+            Text("v\(AppVersion.text) · \(lastUpdateText)")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
             Spacer()
@@ -172,10 +193,15 @@ struct DeviceRow: View {
                                 .fill(Color.primary.opacity(0.06))
                         )
                 }
-                Text(subtitle)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    if device.chemistry.tag != nil {
+                        ChemistryTag(chemistry: device.chemistry)
+                    }
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 6)
             trailing
@@ -184,7 +210,8 @@ struct DeviceRow: View {
         .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(hovering ? Color.primary.opacity(0.05) : Color.clear)
+                .fill(device.isCritical ? DeviceRow.criticalTint.opacity(0.10)
+                                        : (hovering ? Color.primary.opacity(0.05) : Color.clear))
         )
         .onHover { hovering = $0 }
         .help(tooltip)
@@ -204,12 +231,20 @@ struct DeviceRow: View {
 
     private var tooltip: String {
         var lines = [device.name]
+        if let tag = device.chemistry.tag {
+            lines.append("电池类型：\(tag)（\(device.chemistryReason)）")
+        } else if !device.chemistryReason.isEmpty {
+            lines.append("电池类型：未知（\(device.chemistryReason)）")
+        }
         for (key, value) in device.extra.sorted(by: { $0.key < $1.key }) {
             lines.append("\(key)：\(value)")
         }
         lines.append("来源：\(device.source.rawValue) · \(device.transport.rawValue)")
         if device.stale { lines.append("当前未读到最新值，显示最近一次读数") }
         if device.level == nil { lines.append("设备未上报电量；如需查看请使用厂商 App") }
+        if device.isCritical {
+            lines.append("⚠️ 电量低于 \(DeviceBattery.lowBatteryThreshold)%，请及时充电")
+        }
         return lines.joined(separator: "\n")
     }
 
@@ -236,6 +271,7 @@ struct DeviceRow: View {
     }
 
     static let chargingTint = Color(red: 0.13, green: 0.55, blue: 0.95)
+    static let criticalTint = Color(red: 0.87, green: 0.26, blue: 0.24)
 
     private var symbolName: String {
         switch device.kind {
@@ -272,6 +308,35 @@ struct DeviceRow: View {
                 .foregroundStyle(device.level == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(device.batteryColor.tint))
                 .frame(width: 34, alignment: .trailing)
             BatteryBar(level: device.level, style: device.batteryColor, stale: device.stale)
+        }
+    }
+}
+
+// MARK: - 电池类型标签
+
+/// 「锂电池」/「换电池」小标签。锂电池用蓝色表示需要充电，可更换电池用棕色表示换节电池即可。
+struct ChemistryTag: View {
+    let chemistry: BatteryChemistry
+
+    var body: some View {
+        Text(chemistry.tag ?? "")
+            .font(.system(size: 8.5, weight: .semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(tint.opacity(0.14))
+            )
+            .fixedSize()
+            .help(chemistry.summary)
+    }
+
+    private var tint: Color {
+        switch chemistry {
+        case .lithium: return Color(red: 0.16, green: 0.52, blue: 0.86)
+        case .replaceable: return Color(red: 0.60, green: 0.45, blue: 0.22)
+        case .unknown: return .secondary
         }
     }
 }
@@ -319,15 +384,30 @@ extension BatteryLevelStyle {
 struct AboutView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("PowerMeter")
-                .font(.system(size: 13, weight: .semibold))
+            HStack(alignment: .firstTextBaseline) {
+                Text("PowerMeter")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text("v\(AppVersion.text)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
             Text("Mac 外设电量监视器")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
             Divider()
+            Text("电池类型标签")
+                .font(.system(size: 11, weight: .medium))
+            Text("· 锂电池：内置可充电电池，电量低需要充电\n· 换电池：AA/AAA 电池，电量低换一节即可")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+            Text("菜单栏优先显示未充电的锂电池设备；\n电量低于 \(DeviceBattery.lowBatteryThreshold)% 时变红提醒。")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+            Divider()
             Text("数据来源")
                 .font(.system(size: 11, weight: .medium))
-            Text("· 罗技 HID++（接收器 / 蓝牙直连）\n· 系统蓝牙上报（AirPods 等）\n· HID 属性 BatteryPercent\n· BLE 电池服务 0x180F")
+            Text("· 罗技 HID++（接收器 / 蓝牙直连）\n· 系统蓝牙上报（AirPods 等）\n· HID 属性 BatteryPercent\n· IOBluetooth 私有电量（第三方耳机）\n· BLE 电池服务 0x180F")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
             Divider()
@@ -336,7 +416,7 @@ struct AboutView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(16)
-        .frame(width: 280, alignment: .leading)
+        .frame(width: 300, alignment: .leading)
     }
 }
 

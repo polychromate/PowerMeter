@@ -63,11 +63,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusItem() {
         guard let button = statusItem.button else { return }
-        let lowest = store.lowestLevel
+
+        // 优先展示「未充电的锂电池设备」的电量；可更换电池的设备不抢位置
+        let primary = store.menuBarDevice
+        let level = primary?.level
 
         let symbol: String
-        if let lowest = lowest {
-            switch lowest {
+        if let level = level {
+            switch level {
             case 90...: symbol = "battery.100"
             case 65...: symbol = "battery.75"
             case 40...: symbol = "battery.50"
@@ -78,21 +81,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             symbol = "battery.100"
         }
 
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "设备电量")
+        let critical = store.hasCriticalLithium
+        let image = NSImage(systemSymbolName: symbol,
+                            accessibilityDescription: primary.map { "\($0.name) 电量 \($0.levelText)" } ?? "设备电量")
         image?.isTemplate = true
         button.image = image
 
-        if let lowest = lowest {
-            button.title = " \(lowest)%"
-            button.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        } else {
-            button.title = " —"
-            button.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        }
-
-        button.contentTintColor = store.hasCriticalDevice ? .systemRed : nil
-        button.toolTip = "PowerMeter · \(store.summaryLine)"
+        let tint: NSColor = critical ? .systemRed : .labelColor
+        button.attributedTitle = NSAttributedString(
+            string: level.map { " \($0)%" } ?? " —",
+            attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
+                .foregroundColor: tint
+            ]
+        )
+        button.contentTintColor = critical ? .systemRed : nil
+        button.toolTip = statusTooltip
     }
+
+    /// 菜单栏悬浮提示：当前展示的是哪台设备、为什么选它，以及是否需要充电
+    private var statusTooltip: String {
+        var lines = ["PowerMeter \(AppVersion.text)"]
+        if let device = store.menuBarDevice {
+            var description = "菜单栏显示：\(device.name)"
+            if let tag = device.chemistry.tag { description += " · \(tag)" }
+            description += " · \(device.levelText)"
+            if device.charging { description += " · 充电中" }
+            lines.append(description)
+        } else {
+            lines.append("菜单栏显示：暂无可读电量")
+        }
+        if let message = store.criticalMessage {
+            lines.append("⚠️ \(message)")
+        }
+        lines.append(store.summaryLine)
+        return lines.joined(separator: "\n")
+    }
+
 
     // MARK: - 弹窗
 

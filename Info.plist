@@ -2,37 +2,37 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>zh_CN</string>
-    <key>CFBundleExecutable</key>
-    <string>PowerMeter</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.chenge.PowerMeter</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundleName</key>
-    <string>PowerMeter</string>
-    <key>CFBundleDisplayName</key>
-    <string>PowerMeter</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
-    <key>CFBundleVersion</key>
-    <string>100</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>PowerMeter 需要蓝牙访问权限，用于读取蓝牙耳机、鼠标和键盘的电量。</string>
-    <key>NSBluetoothPeripheralUsageDescription</key>
-    <string>PowerMeter 需要蓝牙访问权限，用于读取蓝牙设备的电量。</string>
-    <key>NSHumanReadableCopyright</key>
-    <string>PowerMeter · 本地运行，不联网</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>PowerMeter</string>
+	<key>CFBundleExecutable</key>
+	<string>PowerMeter</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.chenge.PowerMeter</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>PowerMeter</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.2.0</string>
+	<key>CFBundleVersion</key>
+	<string>200</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>PowerMeter 需要蓝牙访问权限，用于读取蓝牙耳机、鼠标和键盘的电量。</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>PowerMeter 需要蓝牙访问权限，用于读取蓝牙设备的电量。</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>PowerMeter · 本地运行，不联网</string>
 </dict>
 </plist>
