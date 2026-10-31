@@ -4,7 +4,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-blue)](https://github.com/polychromate/PowerMeter)
 [![Plugin API](https://img.shields.io/badge/plugin%20API-v1-green)](https://github.com/polychromate/PowerMeter-Plugins)
 
-**版本 0.4.0** · 2026-11-01
+**版本 0.4.1** · 2026-11-01
 
 菜单栏电量平台：优先复用 macOS 已经拿到的电量，读不到再用标准 HID / BLE 直读，
 仍读不到就交给**独立安装的设备插件**处理厂商私有协议。新增设备通常只需要装一个插件，
@@ -35,7 +35,7 @@
 
 ### App
 
-到 [Releases](https://github.com/polychromate/PowerMeter/releases) 下载 `PowerMeter-0.4.0.zip`，
+到 [Releases](https://github.com/polychromate/PowerMeter/releases) 下载 `PowerMeter-0.4.1.zip`，
 解压后把 `PowerMeter.app` 拖进「应用程序」。
 
 应用为自签名证书签名（`PowerMeter Dev`，无 Apple 开发者账号、未公证），
@@ -476,6 +476,13 @@ PowerMeter/
 ---
 
 ## 十四、版本历史
+
+### 0.4.1 — 2026-11-01
+
+- 「关于」面板移除固定的「数据来源」清单：原来写死了系统蓝牙 / HID / BLE / 插件等条目，
+  还举例「罗技、新盟」等厂商，对没装这些插件的人没有意义。
+  面板现在只保留电池类型说明、「运行状态」（动态显示插件与权限问题）和读取能力提示。
+- 插件相关状态仍在「运行状态」与「插件」面板中查看，信息没有丢失。
 
 ### 0.4.0 — 2026-11-01
 
