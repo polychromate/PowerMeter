@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/polychromate/PowerMeter)](https://github.com/polychromate/PowerMeter/releases)
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-blue)](https://github.com/polychromate/PowerMeter)
 
-**版本 0.3.1** · 2026-11-01
+**版本 0.3.2** · 2026-11-01
 
 菜单栏小工具，实时显示罗技键鼠、蓝牙耳机的电量。本地运行，不联网、不上传任何数据。
 
@@ -29,6 +29,7 @@ xattr -dr com.apple.quarantine /Applications/PowerMeter.app
 | 新盟 A99 键盘 | 2.4G USB 接收器（0x3554:FA09） | ✅ 可读（实测 1%→100%，充电状态准确） | 厂商私有协议 `0x13` |
 | Robin's Earphones | 经典蓝牙（HFP） | ✅ 可读（实测 50–60%） | IOBluetooth `batteryPercentSingle` |
 | DJI Mic Mini | 经典蓝牙（HFP） | ✅ 可读（实测 50–60%，偶发单轮 0 读数下一轮恢复） | IOBluetooth `batteryPercentSingle` |
+| Logitech K380 | 经典蓝牙（HID） | ✅ 可读（实测 45%） | HID Battery Strength 元素 |
 | 英菲克 IN9 鼠标 | 2.4G USB 接收器（0x248A:5B2F） | ❌ 接收器不暴露电量（feature/input 报文全无响应），切蓝牙模式可试 | — |
 
 > 悬浮任意一行可看到原始通道信息，例如 `HID++ 0x1000 · 充电中`。
@@ -123,7 +124,11 @@ HID++ 读取罗技接收器不需要额外授权。
    解析 `system_profiler SPBluetoothDataType -json` 的已连接设备，可读 AirPods / Beats 等
    向 macOS 上报电量的设备（含左右耳、充电盒）。
 3. **HID 属性**（`Sources/HIDBattery.swift`）
-   枚举 IOHID 设备的 `BatteryPercent`，覆盖苹果妙控系列与部分第三方 HID 设备。
+   两条子通道：① IOKit 的 `BatteryPercent` 属性（苹果妙控系列等）；
+   ② HID 报告描述符里的 **Battery Strength** 元素（usage page `0x0006` / usage `0x0020`）——
+   多数蓝牙键鼠走的是这条，macOS 不会把它们映射成 `BatteryPercent` 属性，
+   但可以用 `GET_REPORT` 主动读取（实测罗技 K380：report ID 3、报文 `03 09`、
+   逻辑量程 0–20 → 45%）。量程不一定是 0–100，按线性比例折算。
 4. **蓝牙上报**（`Sources/IOBluetoothBattery.swift`）
    读取 `IOBluetoothDevice` 的私有属性 `batteryPercentSingle` / `batteryPercentLeft` /
    `batteryPercentRight` / `batteryPercentCase`。**这正是 macOS「系统设置 → 蓝牙」里
@@ -214,6 +219,13 @@ git checkout v0.1.0            # 回到 0.1.0 的完整工程（含当时的 REA
 和 `PowerMeter-<版本>-source.zip`（该版本 tag 的完整源码，含 README）。
 
 ## 版本历史
+
+### 0.3.2 — 2026-11-01
+
+- 新增 HID **Battery Strength** 元素通道（usage page `0x0006` / usage `0x0020`）：
+  之前只读 IOKit 的 `BatteryPercent` 属性（苹果设备才有），蓝牙键鼠因此读不到电量。
+  现在会主动发 `GET_REPORT` 读取该元素并按逻辑量程折算百分比
+- 实测：Logitech K380（蓝牙）由「未知」变为 **45%**（report ID 3、报文 `03 09`、量程 0–20）
 
 ### 0.3.1 — 2026-11-01
 
