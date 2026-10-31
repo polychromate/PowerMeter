@@ -1,42 +1,402 @@
-# PowerMeter · Mac 外设电量监视器
+# PowerMeter · Mac 外设电量平台
 
 [![Release](https://img.shields.io/github/v/release/polychromate/PowerMeter)](https://github.com/polychromate/PowerMeter/releases)
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-blue)](https://github.com/polychromate/PowerMeter)
+[![Plugin API](https://img.shields.io/badge/plugin%20API-v1-green)](https://github.com/polychromate/PowerMeter-Plugins)
 
 **版本 0.4.0** · 2026-11-01
 
-菜单栏电量平台：系统电量优先、标准蓝牙/HID 直读兜底，并通过独立安装的设备插件支持罗技 HID++、新盟 2.4G 等厂商协议。本地运行，不联网、不上传任何数据。
+菜单栏电量平台：优先复用 macOS 已经拿到的电量，读不到再用标准 HID / BLE 直读，
+仍读不到就交给**独立安装的设备插件**处理厂商私有协议。新增设备通常只需要装一个插件，
+不必更新 App。纯本地运行，不联网、不上传任何数据。
 
 ![界面](Resources/screenshot.png)
 
-## 下载
+> 0.3.2 及更早版本的说明已归档到 **[README-old.md](README-old.md)**。
 
-不想自己编译？到 [Releases](https://github.com/polychromate/PowerMeter/releases) 下载最新的 `PowerMeter-x.y.z.zip`，解压后把 `PowerMeter.app` 拖进「应用程序」即可。
+---
 
-厂商设备支持以独立插件发布：[PowerMeter-Plugins](https://github.com/polychromate/PowerMeter-Plugins)。下载插件 zip 后，在 App 的「插件 › 安装插件…」中选择即可，升级插件不需要更新主程序。
+## 一、平台要解决的三件事
 
-应用为自签名证书签名（`PowerMeter Dev`，无 Apple 开发者账号、未公证），首次打开若提示「无法验证开发者」：
+| 问题 | 过去的做法 | 0.4.0 的做法 |
+| --- | --- | --- |
+| 系统已经有电量，没必要重复问设备 | 各自实现、重复读取 | 统一读取 macOS 已有电量（系统蓝牙 / IOBluetooth），成本最低 |
+| 系统不报电量，但设备支持标准协议 | 散落在各个扫描器里 | 标准 HID Battery Strength、BLE `0x180F` 直读兜底 |
+| 厂商私有协议，标准通道读不到 | 把驱动写进主程序，改代码 → 发新版 | 装一个 `.pmplugin` 插件，主程序不动 |
+
+所以 PowerMeter 现在由两块组成：
+
+- **平台**（本仓库）：设备发现、来源裁决、缓存、界面、插件运行时。
+- **插件**（[PowerMeter-Plugins](https://github.com/polychromate/PowerMeter-Plugins)）：设备识别与协议解析。
+
+---
+
+## 二、下载与安装
+
+### App
+
+到 [Releases](https://github.com/polychromate/PowerMeter/releases) 下载 `PowerMeter-0.4.0.zip`，
+解压后把 `PowerMeter.app` 拖进「应用程序」。
+
+应用为自签名证书签名（`PowerMeter Dev`，无 Apple 开发者账号、未公证），
+首次打开若提示「无法验证开发者」：
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/PowerMeter.app
 ```
 
-## 当前实测结果（本机 macOS 26.6.2）
+### 设备插件
 
-| 设备 | 连接方式 | 读数 | 读取通道 |
+插件在独立仓库发布：[PowerMeter-Plugins Releases](https://github.com/polychromate/PowerMeter-Plugins/releases)。
+下载 zip 后，在菜单面板点 **插件 › 安装插件…** 选择该 zip 即可。
+
+不装插件也能用：系统电量、标准 HID / BLE 直读这两层是内置的，
+AirPods、妙控系列、多数蓝牙键鼠、支持 BLE 电量服务的耳机都能直接读到。
+
+---
+
+## 三、三层电量来源
+
+程序每 60 秒刷新一次：内置通道与所有插件并发执行，再按设备合并去重。
+
+| 层级 | 通道 | 实现 | 典型设备 |
 | --- | --- | --- | --- |
-| Logitech MX Keys | Unifying USB 接收器 | ✅ 可读 + ⚡充电状态（实测 0%，充电中） | 插件 HID++ 2.0 `0x1000` |
-| Logitech M720 Triathlon | Unifying USB 接收器 | ✅ 可读（实测 50%） | 插件 HID++ 2.0 `0x1000` |
-| HAYLOU S35 ANC | 经典蓝牙（HFP/A2DP） | ✅ 可读（实测 90%，与系统设置一致） | IOBluetooth `batteryPercentSingle` |
-| 新盟 A99 键盘 | 2.4G USB 接收器（0x3554:FA09） | ✅ 可读（实测 1%→100%，充电状态准确） | 插件厂商私有协议 `0x13` |
-| Robin's Earphones | 经典蓝牙（HFP） | ✅ 可读（实测 50–60%） | IOBluetooth `batteryPercentSingle` |
-| DJI Mic Mini | 经典蓝牙（HFP） | ✅ 可读（实测 50–60%，偶发单轮 0 读数下一轮恢复） | IOBluetooth `batteryPercentSingle` |
-| Logitech K380 | 经典蓝牙（HID） | ✅ 可读（实测 45%） | HID Battery Strength 元素 |
-| 英菲克 IN9 鼠标 | 2.4G USB 接收器（0x248A:5B2F） | ❌ 接收器不暴露电量（feature/input 报文全无响应），切蓝牙模式可试 | — |
+| ① 系统电量 | `system_profiler SPBluetoothDataType -json` | `Sources/BluetoothBattery.swift` | AirPods、Beats 等向 macOS 上报的设备 |
+| ① 系统电量 | `IOBluetoothDevice.batteryPercent*` 私有属性 | `Sources/IOBluetoothBattery.swift` | 第三方耳机（系统设置里显示的那个数字） |
+| ② 通用直读 | IOKit `BatteryPercent` 属性 | `Sources/HIDBattery.swift` | 苹果妙控系列 |
+| ② 通用直读 | HID **Battery Strength** 元素 `GET_REPORT` | `Sources/HIDBattery.swift` | 多数蓝牙键鼠（K380、MX 系列…） |
+| ② 通用直读 | BLE GATT `0x180F / 0x2A19` | `Sources/BLEScanner.swift` | 支持 BLE 电量上报的耳机、鼠标 |
+| ③ 设备插件 | 厂商私有协议（HID++、私有 Input Report…） | `Sources/PluginPlatform.swift` | 罗技接收器、新盟 2.4G 接收器 |
 
-> 悬浮任意一行可看到原始通道信息，例如 `HID++ 0x1000 · 充电中`。
+BLE 扫描单独降频：**每 5 分钟一轮**，避免频繁连接打扰设备、增加耗电。
+其余通道每分钟一轮。
 
-## 从源码构建
+### 来源裁决
+
+同一台设备可能同时出现在多个通道里。裁决顺序（先有电量者优先，同级再比时间新鲜度）：
+
+| 优先级 | 来源 | 说明 |
+| --- | --- | --- |
+| 0 | 插件（`preferPlugin` / `pluginOnly`） | 插件声明自己更准，覆盖系统结果 |
+| 1 | 蓝牙上报（IOBluetooth） | 与系统设置面板同源 |
+| 2 | 系统蓝牙（system_profiler） | Apple 设备常用 |
+| 3 | HID 属性（BatteryPercent） | 系统已缓存 |
+| 4 | HID 直读 / BLE 电池服务 | 主动查询，成本略高 |
+| 5 | 插件（`fallback`） | 只有前面都读不到时才用 |
+
+插件有三种来源策略，写在清单里，也可以按设备单独返回：
+
+- `preferPlugin` — 插件优先，用于协议比系统更准的设备（罗技、新盟都用这个）。
+- `fallback` — 系统与直读都失败后才启用，适合"锦上添花"的插件。
+- `pluginOnly` — 只用插件，适合系统读数明显错误的设备。
+
+另外两条规则：
+
+- **缓存**：本次没读到电量时，沿用 15 分钟内的最后一次有效值，并标记为「可能已过期」。
+- **未连接不算在线**：接收器插着、蓝牙已配对都不等于设备在线；判定离线的设备整行隐藏，
+  原因写在「关于 › 运行状态」里。
+
+---
+
+## 四、插件平台
+
+这是 0.4.0 的核心：让「支持一款新设备」从"改代码发版"变成"装一个插件"。
+
+### 4.1 插件包结构
+
+```text
+com.example.device.pmplugin/          # 就是一个目录，扩展名 .pmplugin
+├── manifest.json                     # 必需：身份、版本、兼容性、来源策略
+├── plugin.js                         # 必需：设备识别 + 协议解析
+└── ...                               # 可选：说明、测试样本等资源（当前运行时未开放文件读取）
+```
+
+发布时打包成 zip（例如 `com.example.device-1.0.0.pmplugin.zip`），
+App 的安装器会解包并放到插件目录。
+
+### 4.2 manifest.json
+
+```json
+{
+  "id": "com.powermeter.logitech-hidpp",
+  "name": "罗技 HID++",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "minimumAppVersion": "0.4.0",
+  "entry": "plugin.js",
+  "author": "PowerMeter",
+  "description": "通过 HID++ 2.0 读取罗技接收器与蓝牙直连设备的电量",
+  "sourcePolicy": "preferPlugin"
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `id` | ✅ | 唯一标识，仅允许字母、数字、`.`、`-`；安装目录按它命名 |
+| `name` | ✅ | 界面显示名 |
+| `version` | ✅ | 插件自身版本 |
+| `apiVersion` | ✅ | 必须与 App 的插件 API 版本一致（当前 `1`） |
+| `minimumAppVersion` | ✅ | 语义化版本比较，低于它时拒绝加载 |
+| `entry` | ✅ | 入口脚本；不允许绝对路径或 `..` |
+| `sourcePolicy` | ✅ | `preferPlugin` / `fallback` / `pluginOnly` |
+| `author` / `description` | — | 展示用 |
+
+加载时校验：id 格式、API 版本、最低 App 版本、入口文件是否存在、来源策略是否合法。
+任何一项不通过都会在「插件」面板里显示具体原因，而不是静默失败。
+
+### 4.3 运行时与安全边界
+
+每个插件跑在**自己的线程 + 自己的 JavaScriptCore 上下文**里：
+
+- 刷新时平台调用插件的 `snapshot()`，最多等 12 秒，超时跳过本轮并记一条状态。
+- 插件里没有 `require`、没有文件读写、没有网络、没有进程 API。
+- 唯一的外部能力是一个受控 HID 桥 `hid`：枚举、打开、读 Report、写 Report、接收 Input Report。
+- 插件拿到的原始报文由平台转成统一设备模型，界面不知道数据来自哪种协议。
+
+这样做的好处：插件崩溃或死循环不会拖垮 App（线程隔离 + 超时），
+同时插件也无法读你的文件或发网络请求。
+
+### 4.4 插件 API
+
+全局对象：`hid`、`powermeter`（`{ id, apiVersion }`）、`log(message)`。
+
+| 调用 | 作用 |
+| --- | --- |
+| `hid.listDevices(match)` | 枚举 HID 设备，返回设备描述数组 |
+| `hid.openDevice(id)` | 独占打开设备（罗技接收器等需要独占） |
+| `hid.closeDevice(id)` | 关闭设备 |
+| `hid.setReport({ id, type, reportID, data })` | 写 Report，`type` 为 `output` / `feature` / `input` |
+| `hid.getReport({ id, type, reportID, length })` | 读 Report，返回字节数组 |
+| `hid.takeReports(id)` | 取走并清空缓存的 Input Report（适合常驻监听） |
+| `hid.wait(ms)` | 等待并驱动 RunLoop，用于协议往返（1–1000 ms） |
+| `hid.status()` | 最近一次错误（权限、IOKit 返回码、设备断开） |
+| `hid.requestAccess()` | 主动请求「输入监控」权限 |
+
+`match` 支持的键：`vendorID`、`productID`、`usagePage`、`usage`、`transport`、`productContains`
+（整数按 HID 属性精确匹配，`productContains` 为不区分大小写的子串匹配）。
+
+设备描述字段：`id`、`product`、`manufacturer`、`vendorID`、`productID`、
+`usagePage`、`usage`、`transport`、`locationID`。
+
+### 4.5 插件必须实现什么
+
+**`snapshot()`（必需）** 返回一次完整读数：
+
+```js
+{
+  devices: [
+    {
+      id: "receiver-1-mxkeys",   // 插件内唯一
+      name: "MX Keys",           // 与系统来源同名时会被合并
+      kind: "keyboard",          // keyboard / mouse / headset / trackpad / gamepad / speaker / microphone / other
+      transport: "logitechReceiver", // logitechReceiver / bluetooth / ble / usb / hid
+      level: 45,                 // 0–100，读不到就给 null
+      charging: false,
+      connected: true,           // false 会被整行隐藏
+      detail: "接收器直读 · 充电中", // 悬浮提示里的说明
+      lastUpdate: Date.now(),    // 毫秒时间戳
+      stale: false,              // true 表示这是旧值
+      extra: { "电压": "3980 mV" }, // 悬浮提示里的附加字段
+      sourcePolicy: "preferPlugin"  // 可覆盖清单里的策略
+    }
+  ],
+  status: ""                     // 可选：出错原因，会显示在「关于 › 运行状态」
+}
+```
+
+**`selfTest()`（可选）** 返回错误字符串数组，供 `--plugin-self-test` 做无硬件回归：
+
+```js
+function selfTest() {
+  var errors = [];
+  if (parseReport([0x13, 0, 0, 0, 0, 0, 0x63, 0x00]).level !== 99) errors.push("在线报文");
+  return errors;
+}
+```
+
+### 4.6 安装、升级与卸载
+
+| 操作 | 方式 |
+| --- | --- |
+| 安装 / 升级 | 面板 **插件 › 安装插件…**，选 `.pmplugin` 目录或 zip；同 id 覆盖安装即升级 |
+| 重新载入 | 面板 **插件 › 重新载入**，改完插件不用重启 App |
+| 打开目录 | 面板 **插件 › 插件目录** |
+| 卸载 | 在插件目录里删掉对应的 `<id>.pmplugin`，再点「重新载入」 |
+| 命令行安装 | `PowerMeter --install-plugin <路径>` |
+
+安装位置：`~/Library/Application Support/PowerMeter/Plugins/`。
+开发时可用环境变量 `POWERMETER_PLUGIN_DIR` 指向源码目录，直接对着工作副本调试。
+
+插件与 App 的版本关系是松耦合的：插件升级不需要重装 App；
+只有当插件要求更高的 `apiVersion` / `minimumAppVersion` 时，才需要升级主程序。
+
+### 4.7 插件索引
+
+插件仓库构建时会生成 `index.json`，列出每个插件的 id、版本、兼容性、下载地址和 SHA-256。
+它是**给分发用的清单**：目前 App 还没有内置插件商店，需要手动下载 zip 安装；
+后续版本会接入这个索引，实现应用内浏览与一键更新。
+
+---
+
+## 五、写一个插件
+
+下面是一个最小可用插件：一台走标准 HID Battery Strength 的蓝牙键盘（示意值，请按实际报文调整）。
+
+`manifest.json`：
+
+```json
+{
+  "id": "com.example.simple-hid",
+  "name": "示例：标准 HID 电量",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "minimumAppVersion": "0.4.0",
+  "entry": "plugin.js",
+  "sourcePolicy": "fallback"
+}
+```
+
+`plugin.js`：
+
+```js
+var handle = null;
+
+function ensureDevice() {
+  if (handle) return "";
+  // 先按 VID/PID 找，找不到再放宽到 usagePage
+  var devices = hid.listDevices({ usagePage: 0x0001, productContains: "Example Keyboard" });
+  if (!devices.length) return hid.status();          // 空字符串表示"没发现设备"，不是错误
+  if (!hid.openDevice(devices[0].id)) return hid.status() || "无法打开设备";
+  handle = devices[0].id;
+  return "";
+}
+
+function readLevel() {
+  // 标准 Battery Strength：report ID 3，第二个字节是 0–20 的逻辑量
+  var report = hid.getReport({ id: handle, type: "input", reportID: 3, length: 8 });
+  if (!report.length) return null;
+  return Math.round((report[1] & 0x1f) * 100 / 20);
+}
+
+function snapshot() {
+  var error = ensureDevice();
+  if (!handle) return { devices: [], status: error };
+
+  var level = readLevel();
+  return {
+    devices: [{
+      id: "example-keyboard",
+      name: "Example Keyboard",
+      kind: "keyboard",
+      transport: "bluetooth",
+      level: level,
+      charging: false,
+      connected: true,
+      detail: level === null ? "已连接，本次未读到电量（设备休眠）" : "HID Battery Strength",
+      lastUpdate: Date.now(),
+      stale: false,
+      extra: { "协议": "HID 0x0006/0x0020" }
+    }],
+    status: error
+  };
+}
+
+function selfTest() {
+  return [];   // 纯解析逻辑可以在这里做断言
+}
+```
+
+调试建议：
+
+```bash
+# 1. 直接对着源码目录跑，改完在面板点「重新载入」
+POWERMETER_PLUGIN_DIR=/path/to/myplugin \
+  /Applications/PowerMeter.app/Contents/MacOS/PowerMeter --plugin-self-test
+
+# 2. 看某台设备为什么没电、各通道抓到了什么
+/Applications/PowerMeter.app/Contents/MacOS/PowerMeter --dump
+```
+
+几条经验：
+
+- `snapshot()` 每次刷新都会被调用，**不要在里面做耗时握手**；把会话缓存在闭包里。
+- 常驻上报的设备（如接收器）用 `hid.takeReports()` 排空缓存，别用 `getReport` 硬等。
+- 设备休眠是常态：读不到就返回 `level: null`，平台会沿用 15 分钟内的旧值并标注过期。
+- 设备真的离线时返回 `connected: false`，界面会整行隐藏，不会拿 0% 吓人。
+
+---
+
+## 六、现有插件
+
+| 插件 | 支持的设备 | 读取方式 | 版本 |
+| --- | --- | --- | --- |
+| **罗技 HID++** `com.powermeter.logitech-hidpp` | Unifying / Bolt 接收器下的罗技键鼠、蓝牙直连罗技外设 | HID++ 2.0：`0x1000` → `0x1004` → `0x1001`（电压换算），自动探测 1–6 号槽位 | 1.0.0 |
+| **新盟 2.4G** `com.powermeter.xinmeng` | 新盟 A99 / M71 等 2.4G 接收器键盘（VID `0x3554`） | 监听 vendor Input Report `0x13`，过滤键盘离线占位报文 | 1.0.0 |
+
+源码、构建脚本、插件索引在 [polychromate/PowerMeter-Plugins](https://github.com/polychromate/PowerMeter-Plugins)，
+可以单独 clone、单独发版。
+
+---
+
+## 七、界面与显示规则
+
+- 启动后没有 Dock 图标，只在菜单栏出现电量图标；点击展开面板，右上角可手动刷新。
+- 每 60 秒自动刷新。
+- 鼠标悬停任意一行，可看到数据来源、协议细节、电池类型判定依据。
+- 每台设备带电池类型标签：`锂电池`（内置可充电）或 `换电池`（AA/AAA），判断不出就不显示。
+
+**菜单栏只显示一台设备的电量**，挑选顺序：
+
+1. 未充电的锂电池设备中电量最低的一台（最需要关注）；
+2. 若锂电池设备都在充电 → 显示充电中的锂电池设备；
+3. 若没有锂电池设备 → 显示其它有读数的设备。
+
+可更换电池的设备不抢菜单栏位置。未充电的锂电池设备电量 < 15% 时，菜单栏数字变红、
+面板顶部出现红色提醒条；充电中的设备不触发（充电时的 0% 不是异常）。
+
+电池类型判定顺序（`Sources/BatteryClassifier.swift`）：手动指定 → 观察到充电 →
+罗技电压读数 → 已知型号库 → 类型兜底。型号不在库里时可以自己写
+`~/Library/Application Support/PowerMeter/battery-types.json`：
+
+```json
+{ "m720": "replaceable", "mx keys": "lithium" }
+```
+
+键按小写子串匹配设备名，重启 App 生效。
+
+---
+
+## 八、命令与诊断
+
+```bash
+APP=/Applications/PowerMeter.app/Contents/MacOS/PowerMeter
+
+$APP --dump                  # 打印各通道原始抓取结果，排查设备为什么读不到
+$APP --snapshot out.png      # 离屏渲染界面截图（不需要屏幕录制权限）
+$APP --install-plugin <路径>  # 安装 / 升级插件
+$APP --plugin-self-test      # 跑所有插件的 selfTest()，无硬件也能验解析逻辑
+```
+
+运行时的最近一次结果会写到 `~/Library/Application Support/PowerMeter/last-scan.json`，
+含设备、来源、插件版本、菜单栏选择和状态提示。
+
+---
+
+## 九、权限
+
+| 权限 | 什么时候需要 | 说明 |
+| --- | --- | --- |
+| 蓝牙 | 首次启动 | BLE 电量服务扫描、耳机连接状态 |
+| 输入监控 | 插件需要打开 HID 设备时（如新盟接收器键盘） | macOS 对 GUI App 打开 HID 强制要求，且不会自动弹窗 |
+
+不装需要 HID 独占的插件，就不需要「输入监控」。
+没授权时 App 会调用 `IOHIDRequestAccess` 触发弹窗，被拒后请到
+`系统设置 › 隐私与安全性 › 输入监控` 手动启用并重启 App；
+插件面板会直接显示这条原因，不会静默失败。
+
+---
+
+## 十、从源码构建
 
 ```bash
 git clone https://github.com/polychromate/PowerMeter.git
@@ -46,144 +406,33 @@ open build/PowerMeter.app
 ```
 
 需要 Xcode Command Line Tools（`xcode-select --install`），不依赖完整 Xcode。
-
-装到「应用程序」以便长期使用：
+装到「应用程序」：
 
 ```bash
 cp -R build/PowerMeter.app /Applications/
 ```
 
-启动后没有 Dock 图标，只在菜单栏出现电量图标（显示当前最需要关注的那台设备的电量）。点击图标展开面板。
+`./release.sh` 会额外产出 `releases/PowerMeter-<版本>.zip`（可直接运行）和
+`PowerMeter-<版本>-source.zip`（该版本源码）。
 
-- 每 60 秒自动刷新，点击面板右上角可手动刷新
-- 鼠标悬停某一行可看到电池类型判定依据、数据来源、协议细节
-- 每台设备带电池类型标签：`锂电池`（内置可充电）或 `换电池`（AA/AAA）
-- 菜单栏优先显示**未充电的锂电池设备**的电量，可更换电池设备不抢位置
-- 未充电的锂电池设备电量 < 15% 时，菜单栏数字变红，面板顶部出现红色提醒条
-- 正在充电的设备显示蓝色电量条 + 「⚡充电」标签，图标右下角带闪电徽标
-- 数据源运行状态提示（如某通道未就绪）收纳在「关于」弹层里，主面板保持干净
+---
 
-## 电池类型标签
+## 十一、实测结果（本机 macOS 26.6.2）
 
-| 标签 | 含义 | 电量低时该做什么 |
-| --- | --- | --- |
-| `锂电池` | 内置可充电锂电（MX Keys、HAYLOU、妙控系列…） | 插线充电 |
-| `换电池` | 使用 AA / AAA 电池（M720 Triathlon、K380、M185…） | 换一节新电池 |
-| 无标签 | 判断不出来（型号不在已知库，也没观察到充电） | — |
+| 设备 | 连接方式 | 读数 | 通道 |
+| --- | --- | --- | --- |
+| Logitech MX Keys | Unifying 接收器 | ✅ 可读 + ⚡充电状态（实测 0%，充电中） | 插件 罗技 HID++ |
+| Logitech M720 Triathlon | Unifying 接收器 | ✅ 可读（实测 50%） | 插件 罗技 HID++ |
+| 新盟 A99 键盘 | 2.4G 接收器（`0x3554:FA09`） | ✅ 可读（实测 1%→100%，充电状态准确） | 插件 新盟 2.4G |
+| HAYLOU S35 ANC | 经典蓝牙（HFP/A2DP） | ✅ 可读（实测 90%，与系统设置一致） | 蓝牙上报 |
+| Robin's Earphones | 经典蓝牙（HFP） | ✅ 可读（实测 50–60%） | 蓝牙上报 |
+| DJI Mic Mini | 经典蓝牙（HFP） | ✅ 可读（实测 50–60%，偶发单轮 0 读数下一轮恢复） | 蓝牙上报 |
+| Logitech K380 | 经典蓝牙（HID） | ✅ 可读（实测 45%） | HID Battery Strength |
+| 英菲克 IN9 鼠标 | 2.4G 接收器（`0x248A:5B2F`） | ❌ 接收器不暴露任何电量通道，切蓝牙模式可试 | — |
 
-判定顺序（`Sources/BatteryClassifier.swift`，可靠性从高到低）：
+---
 
-1. `~/Library/Application Support/PowerMeter/battery-types.json` 手动指定；
-2. 观察到充电状态 → 锂电池（只有可充电电池才会报 charging）；
-3. 罗技 `0x1001` 电压读数 → ≤3.3V 判为 AA/AAA，≥3.4V 判为单节锂电；
-4. 已知型号库（MX Keys / MX Master / 妙控系列 / AirPods / M720 / K380 …）；
-5. 类型兜底：耳机、触控板基本都是内置锂电。
-
-判断不出来就不显示标签 —— 宁可不说，也不给错信息。型号不在库里时可以自己指定：
-
-```json
-{ "m720": "replaceable", "mx keys": "lithium" }
-```
-
-写到 `~/Library/Application Support/PowerMeter/battery-types.json` 即可，键按小写子串匹配设备名（重启 App 生效）。
-
-## 菜单栏显示规则
-
-菜单栏只显示**一台**设备的电量，按下面的优先级挑选：
-
-1. 未充电的锂电池设备中电量最低的一台（最需要关注）；
-2. 若锂电池设备都在充电 → 显示充电中的锂电池设备；
-3. 若没有锂电池设备 → 显示其它有读数的设备。
-
-可更换电池的设备**不会抢占**菜单栏位置：AA 电池没电换一节就好，不需要你惦记。
-鼠标悬停菜单栏图标可以看到当前显示的是哪台设备、以及为什么选它。
-
-低电量提醒：未充电的**锂电池**设备电量 < 15% 时，菜单栏数字变红、面板顶部出现红色提醒条。
-正在充电的设备不触发提醒（充电中的 0% 不是异常）；可更换电池设备也不触发（换电池即可）。
-
-## 权限
-
-首次启动会请求「蓝牙」权限（`系统设置 › 隐私与安全性 › 蓝牙`），用于 BLE 电池服务扫描和耳机连接状态。
-HID++ 读取罗技接收器不需要额外授权。
-
-**「输入监控」权限**（连接新盟等 2.4G 接收器键盘时需要）：macOS 对 GUI App 打开 HID 设备
-强制要求该权限（`IOHIDManagerOpen` 返回 `0xE00002E2 kIOReturnNotPermitted`），且系统不会
-自动弹窗。App 检测到需要时会调用 `IOHIDRequestAccess` 触发授权请求；若弹窗被拒，请到
-`系统设置 › 隐私与安全性 › 输入监控` 手动启用 PowerMeter 后重启 App。命令行运行
-`--dump` 不受此限制（继承终端的权限）。
-
-## 电量来源与插件平台
-
-程序把来源分为三层，同一设备自动合并去重：
-
-1. **系统电量**（`Sources/BluetoothBattery.swift`、`Sources/IOBluetoothBattery.swift`）
-   - `system_profiler SPBluetoothDataType -json`：AirPods / Beats 等向 macOS 上报的设备。
-   - `IOBluetoothDevice` 的 `batteryPercentSingle` / `Left` / `Right` / `Case`：
-     第三方耳机电量，与系统设置一致。
-   系统有新鲜读数时默认优先使用，成本最低。
-2. **通用直接读取**（`Sources/HIDBattery.swift`、`Sources/BLEScanner.swift`）
-   - IOKit `BatteryPercent` 系统属性。
-   - HID **Battery Strength** 元素（`0x0006 / 0x0020`）的 `GET_REPORT`。
-   - BLE GATT `0x180F / 0x2A19`。
-   系统没有有效电量时，用这些标准通道兜底。
-3. **独立设备插件**（`Sources/PluginPlatform.swift`、`Sources/PluginHIDBridge.swift`）
-   插件在独立线程和 JavaScriptCore 上下文中运行，主程序只暴露受控 HID 能力：
-   枚举设备、打开设备、读写 Report、接收 Input Report 和等待 RunLoop。
-   插件不能直接访问文件或网络；由主程序统一生成设备模型、缓存和界面。
-
-### 插件安装
-
-插件仓库：[polychromate/PowerMeter-Plugins](https://github.com/polychromate/PowerMeter-Plugins)
-
-- 在菜单面板点「插件 › 安装插件…」，选择 `.pmplugin` 目录或 zip。
-- 插件默认安装到 `~/Library/Application Support/PowerMeter/Plugins/`。
-- 插件独立升级，不要求更新 App；只有平台 API 不兼容时才需要升级主程序。
-- 命令行安装：`PowerMeter --install-plugin <zip>`。
-- 插件自测：设置 `POWERMETER_PLUGIN_DIR` 后运行 `PowerMeter --plugin-self-test`。
-
-当前插件仓库提供：
-
-- **罗技 HID++**：通过 `0x1000` → `0x1004` → `0x1001` 读取电量和充电状态，
-  自动探测 Unifying / Bolt 接收器 1–6 号槽位。
-- **新盟 2.4G**：监听 vendor Input Report `0x13`，过滤键盘离线时的占位报文。
-
-插件清单声明 `apiVersion`、`minimumAppVersion` 和来源策略：
-`preferPlugin`（优先于系统）、`fallback`（系统/直读失败后兜底）、`pluginOnly`。
-
-> **未连接的设备不进列表**：接收器插在电脑上、或蓝牙里已配对，都不代表设备在线。
-> 判定为未连接（收到占位报文 / 长时间无任何报文）的设备会整行隐藏，
-> 「关于 › 运行状态」里会写明隐藏原因。
-
-## 关于耳机（HAYLOU S35 ANC）
-
-一开始结论是「读不到」，后来定位到真正的通道，现已正常显示：
-
-- `system_profiler SPBluetoothDataType` 与 IORegistry 里确实**没有** `device_batteryLevel*`
-  —— 这条路只对 AirPods 等 Apple 设备有效，容易让人误判为「耳机不上报」；
-- CoreBluetooth 也扫不到它（经典蓝牙连接时不开放 BLE 广播），没有 `0x180F` 电池服务；
-- 真正的数据在 `IOBluetoothDevice` 的私有属性 `batteryPercentSingle` 上：bluetoothd 收到耳机
-  HFP `AT+IPHONEACCEV` 后写入该属性，系统设置面板读的就是它。
-
-因此 App 增加了一路 IOBluetooth 数据源，现在与系统设置显示的数值一致（实测 90%）。
-工程上有个坑：`+[IOBluetoothDevice pairedDevices]` **不能在主线程调用**
-（内部会等主队列信号量，直接死锁/崩溃），必须在后台线程；而且它只能在
-LaunchServices 启动的 App 里调用，终端里直接执行二进制会因 TCC 无法归属而被内核中止，
-所以 `--dump` 会跳过这一路并给出提示。
-
-## 命令行诊断
-
-```bash
-# 打印各数据源的原始抓取结果，排查某台设备为什么没有电量
-build/PowerMeter.app/Contents/MacOS/PowerMeter --dump
-
-# 离屏渲染界面截图（不需要屏幕录制权限）
-build/PowerMeter.app/Contents/MacOS/PowerMeter --snapshot out.png
-```
-
-运行时的最近一次扫描结果也会写到
-`~/Library/Application Support/PowerMeter/last-scan.json`，便于排查。
-
-## 文件结构
+## 十二、文件结构
 
 ```
 PowerMeter/
@@ -191,113 +440,54 @@ PowerMeter/
 ├── release.sh                # 编译 + 打包 app / 源码到 releases/
 ├── Info.plist                # LSUIElement 菜单栏应用 + 蓝牙用途说明 + 版本号
 ├── Sources/
-│   ├── main.swift            # 入口，含 --dump / --snapshot 分支
+│   ├── main.swift            # 入口：--dump / --snapshot / --install-plugin / --plugin-self-test
 │   ├── AppDelegate.swift     # 状态栏图标、菜单栏选机策略、弹窗、单实例保护
-│   ├── Models.swift          # 设备模型、电池类型枚举、低电量阈值
-│   ├── BatteryClassifier.swift  # 锂电池 / 换电池判定
-│   ├── PluginPlatform.swift  # 插件清单、安装、JS 运行时、来源仲裁
-│   ├── PluginHIDBridge.swift # 插件可访问的受控 HID API
-│   ├── BluetoothBattery.swift
-│   ├── IOBluetoothBattery.swift # 第三方耳机电量（等同系统设置）
-│   ├── HIDBattery.swift
-│   ├── BLEScanner.swift
-│   ├── DeviceStore.swift     # 多源聚合、去重、缓存、菜单栏候选
-│   ├── ContentView.swift     # SwiftUI 界面与插件管理
-│   └── SnapshotMode.swift    # ImageRenderer 离屏截图
+│   ├── Models.swift          # 统一设备模型、来源枚举、电池类型
+│   ├── DeviceStore.swift     # 多源聚合、来源裁决、缓存、菜单栏候选
+│   ├── PluginPlatform.swift  # 清单校验、安装、JS 运行时、超时与状态
+│   ├── PluginHIDBridge.swift # 插件可见的受控 HID API
+│   ├── BluetoothBattery.swift    # 系统蓝牙
+│   ├── IOBluetoothBattery.swift  # 蓝牙上报（同系统设置）
+│   ├── HIDBattery.swift          # HID 属性 + Battery Strength 直读
+│   ├── BLEScanner.swift          # BLE 电池服务 0x180F
+│   ├── BatteryClassifier.swift   # 锂电池 / 换电池判定
+│   ├── ContentView.swift         # SwiftUI 界面与插件管理面板
+│   └── SnapshotMode.swift        # ImageRenderer 离屏截图
 ├── Resources/                # 图标与截图
-└── releases/                 # 各版本的 app 包与源码包（不进 git）
+└── releases/                 # 各版本产物（不进 git）
 ```
 
-## 说明
+---
 
-- 只允许运行一个实例（罗技接收器是独占设备，多开会导致读不到电量）
-- 编译使用系统自带 `swiftc`，产物为 arm64、ad-hoc 签名；不需要安装 Xcode
-- 设备休眠时读不到新值，会显示上一次的有效读数（电量条半透明）并在提示中说明
+## 十三、当前边界
 
-## 版本与归档
+明确写出来，避免期待落空：
 
-仓库用 git 打标签保存每个可用版本：
+- **插件目前只能访问 HID**。BLE GATT 读写还没有开放给插件，BLE 设备走内置扫描器；
+  需要 GATT 私有协议的设备暂时只能等平台补上这层能力。
+- **没有签名校验**。插件安装时不做代码签名或公证检查，请只安装可信来源的插件。
+- **没有应用内插件商店**。`index.json` 已随插件仓库发布，但 App 还没消费它，
+  目前需要手动下载 zip。
+- **插件是用户态实现**，不加载原生动态库、不装内核扩展；需要复杂原生能力的协议
+  目前只能靠 JavaScript 在 HID 报文层面实现。
+- 设备身份仍以**规范化设备名**为合并键。同名设备（两台完全一样的键盘）可能被合并。
+- 只允许运行一个实例（HID 设备通常独占，多开会导致读不到电量）。
 
-```bash
-git tag -l                     # v0.1.0  v0.2.0
-git checkout v0.1.0            # 回到 0.1.0 的完整工程（含当时的 README）
-./release.sh                   # 当前版本编译 + 打包到 releases/
-```
+---
 
-`releases/` 下每个版本有两个包：`PowerMeter-<版本>.zip`（可直接运行的 app）
-和 `PowerMeter-<版本>-source.zip`（该版本 tag 的完整源码，含 README）。
-
-## 版本历史
+## 十四、版本历史
 
 ### 0.4.0 — 2026-11-01
 
-- 升级为可扩展电量平台：系统电量默认优先、标准 HID/BLE 直读兜底、设备插件按策略覆盖。
-- 新增独立设备插件机制（API v1）：插件清单、JavaScriptCore 运行时、受控 HID 桥、
-  来源策略、安装/升级、插件管理界面和命令行安装/自测。
-- 将罗技 HID++ 与新盟 2.4G 从主程序迁移为独立插件，分别发布在
-  [PowerMeter-Plugins](https://github.com/polychromate/PowerMeter-Plugins)；
-  新增设备支持不再需要更新主程序。
+- 从「支持若干设备的小工具」改造为**电量平台**：系统电量优先、标准 HID/BLE 直读兜底、
+  设备插件按策略覆盖。
+- 新增独立插件机制（API v1）：清单与版本兼容校验、zip 安装、独立线程 JavaScriptCore 运行时、
+  受控 HID 桥、三种来源策略、12 秒超时保护、插件管理面板与命令行安装/自测。
+- 罗技 HID++ 与新盟 2.4G 从主程序源码**完全移出**，迁移为两个独立插件，
+  发布在 [PowerMeter-Plugins](https://github.com/polychromate/PowerMeter-Plugins)。
 - 拆分 HID `BatteryPercent` 系统属性与 `Battery Strength` 主动直读的来源标记，
-  使“系统优先、直读兜底”可被正确裁决。
-- 稳定设备缓存键改为规范化设备名，并合并多来源附加信息。
-- 应用版本升级为 0.4.0，主程序仍保持本地运行、不联网。
+  使「系统优先、直读兜底」可以被正确裁决。
+- 新增 `last-scan.json` 中的插件与来源信息，便于排查。
+- 主程序仍保持本地运行、不联网。
 
-### 0.3.2 — 2026-11-01
-
-- 新增 HID **Battery Strength** 元素通道（usage page `0x0006` / usage `0x0020`）：
-  之前只读 IOKit 的 `BatteryPercent` 属性（苹果设备才有），蓝牙键鼠因此读不到电量。
-  现在会主动发 `GET_REPORT` 读取该元素并按逻辑量程折算百分比
-- 实测：Logitech K380（蓝牙）由「未知」变为 **45%**（report ID 3、报文 `03 09`、量程 0–20）
-
-### 0.3.1 — 2026-11-01
-
-- 修复：键盘关机后仍显示 1%。新盟接收器在键盘未连接时会发送占位报文
-  `13 0a 01 00 04 02 01 00`，其中电量字节的 1% 是无效值（连接状态字节为 0x02）；
-  内核驱动没有处理这种情况（`online` 标志只置真），旧实现把它当成了真实电量
-- **未连接的设备不再出现在列表里**：接收器插在电脑上 / 蓝牙已配对都不等于设备在线。
-  新盟键盘在以下情况会整行隐藏——收到「未连接」占位报文、曾经有读数后持续 5 分钟
-  无报文、或启动后 60 秒内始终没有报文。「关于 › 运行状态」会说明隐藏原因
-- 解析逻辑抽成纯函数 `XinmengReport.parse` 与状态机 `XinmengState`，可脱离硬件回归测试
-  （测试用例覆盖真实抓包样本、校验和、开关机与静默超时）
-
-### 0.3.0 — 2026-10-25
-
-- 新增设备适配：新盟 A99 键盘（内置锂电）、英菲克 IN9 鼠标（内置 500mAh 锂电）、
-  DJI Mic Mini 无线麦克风（发射器内置 114mAh 锂电，蓝牙直连 Mac 时可识别）、
-  Robin's earphone 蓝牙耳机（HFP 上报电量，走 IOBluetooth 通道）
-- 新增第六路数据源「厂商私有协议」（`Sources/XinmengHID.swift`）：新盟 2.4G 接收器
-  （VID 0x3554:FA09）的电量经 vendor 接口 Input Report `0x13` 上报，协议逆向自
-  Linux 内核 hid-xinmeng 驱动；实机验证读数正确（含充电状态）。报文带校验和验证，
-  键盘休眠时发出的 0% 占位报文会被忽略（保留最后一次有效读数）。首次使用需在
-  「系统设置 › 隐私与安全性 › 输入监控」允许 PowerMeter。键盘闲置休眠期间不发
-  报文，敲键唤醒后 30 秒内恢复更新
-- 英菲克 IN9 实测结论：2.4G 接收器（0x248A:5B2F）不向系统暴露任何电量通道
-  （无 HID BatteryPercent、feature/input 报文均无响应），仅蓝牙模式可尝试读取
-- 新增 `microphone` 设备类型：面板显示麦克风图标，排序位于音箱之后
-- 设备名识别支持「新盟 / Xinmeng / A99」「英菲克 / inphic / IN9」「DJI Mic / Mic Mini」等
-  命名变体；多来源同名设备（带 / 不带品牌前缀）合并更稳
-- 电池类型库新增上述型号，低电量提醒（<15% 变红）对这几台设备同样生效
-- 运行时快照新增 `notes` 段，便于排查权限 / 数据源问题
-- 数据源提示从主面板底部移入「关于」弹层（「运行状态」段），主面板只显示设备
-- 蓝牙电量毛刺修复：上报过的设备偶发读到全 0（HFP 抖动）不再显示 0% 并触发
-  低电量告警，改为沿用最近一次有效读数并标记数据延迟
-- 构建脚本改为优先使用本地自签证书「PowerMeter Dev」签名（无证书环境自动退回
-  ad-hoc）；固定签名身份使「输入监控」等 TCC 授权在重新编译后依然有效
-
-### 0.2.0 — 2026-10-25
-
-- 新增电池类型标签：`锂电池`（内置可充电）/ `换电池`（AA、AAA），依据型号库、充电状态、电压区间综合判定，判断不出就不打标签
-- 菜单栏改为「优先显示未充电的锂电池设备」，可更换电池设备不再抢占菜单栏位置
-- 未充电的锂电池设备电量 < 15% 时，菜单栏数字变红 + 面板顶部红色提醒条
-- 支持 `~/Library/Application Support/PowerMeter/battery-types.json` 手动指定电池类型
-- 运行时快照新增 `menuBar` 段，便于确认菜单栏当前选了哪台设备
-
-### 0.1.0 — 2026-10-25
-
-首个可用版本，本机实测通过（MX Keys / M720 Triathlon / HAYLOU S35 ANC 三台设备全部正确读数）。
-
-- 五路数据源聚合：罗技 HID++ 2.0、系统蓝牙、HID `BatteryPercent`、IOBluetooth 私有电量、BLE `0x180F`
-- 罗技充电状态解析（`0x1000` 状态枚举），界面显示闪电徽标 + 「⚡充电」标签
-- 第三方耳机电量（IOBluetooth `batteryPercentSingle`），与系统设置一致
-- 设备休眠时沿用最近一次读数并半透明标注
-- `--dump` 数据源诊断、`--snapshot` 离屏渲染截图
+更早版本（0.1.0 – 0.3.2）的完整记录见 **[README-old.md](README-old.md)**。
