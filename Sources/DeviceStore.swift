@@ -211,7 +211,9 @@ final class DeviceStore: ObservableObject {
 
             merged.append(best)
         }
-        return merged
+        // 未连接的设备不进列表：接收器插着 / 蓝牙已配对都不等于设备在线，
+        // 列出来只会显示过时或虚假的电量
+        return merged.filter { $0.connected }
     }
 
     private func normalize(_ name: String) -> String {

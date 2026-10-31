@@ -32,6 +32,49 @@ private enum HIDInputPermission {
     }
 }
 
+/// 一条 vendor input report 的解析结果。
+///
+/// 抽成纯函数是为了能脱离硬件回归测试：抓到的真实样本可直接喂进来验证。
+enum XinmengReport {
+    case battery(level: Int, charging: Bool)
+    /// 接收器在线、但键盘未连接（关机 / 休眠 / 不在 2.4G 模式）
+    case offline
+    /// 心跳、LED 状态等与电量无关的报文
+    case ignored
+
+    /// 实测样本（`13` 开头，第 7 字节电量、第 8 字节充电状态）：
+    /// - `13 0a 01 00 04 05 63 01` → 99%，放电中
+    /// - `13 0a 01 00 04 05 64 11` → 100%，充电中
+    /// - `13 0a 01 00 04 02 01 00` → 键盘未连接时的占位报文，电量字节的 1% 是假的
+    ///
+    /// 对比可 online/offline 样本可见第 6 字节随连接状态变化（0x05 / 0x02），
+    /// 判定为连接状态字节。该推断未经厂商确认，故只在 0x02 这一个取值上生效：
+    /// 万一它其实别有含义，最坏也只是少显示一次读数，不会编造电量。
+    private static let linkByteIndex = 5
+    private static let linkOffline: UInt8 = 0x02
+    private static let capacityIndex = 6
+    private static let statusIndex = 7
+    /// 充电状态字节的有效取值：0x01 放电、0x10 / 0x11 充电
+    private static let validStatus: Set<UInt8> = [0x01, 0x10, 0x11]
+
+    static func parse(_ data: [UInt8], length: Int) -> XinmengReport {
+        guard length >= 8, data[0] == 0x13 else { return .ignored }
+        // 21 字节长报文带校验和（末字节 = 前面所有字节之和的低 8 位）；
+        // macOS 上的 8 字节短报文不带校验和，跳过验证
+        if length > 8 {
+            let sum = data.prefix(length - 1).reduce(0 as UInt8) { $0 &+ $1 }
+            guard sum == data[length - 1] else { return .ignored }
+        }
+        // 未连接占位报文：连接字节 0x02，此时电量字节是无效值，绝不能当读数
+        if data[linkByteIndex] == linkOffline { return .offline }
+        // 状态字节为 0 表示这条报文没携带有效电量信息（键盘休眠时也会这样发）
+        guard validStatus.contains(data[statusIndex]) else { return .ignored }
+        let capacity = Int(data[capacityIndex])
+        guard (1...100).contains(capacity) else { return .ignored }
+        return .battery(level: capacity, charging: data[statusIndex] == 0x10 || data[statusIndex] == 0x11)
+    }
+}
+
 /// 新盟（Xinmeng）2.4G 接收器的厂商私有电量协议。
 ///
 /// 接收器 VID 0x3554（A99 / M71 等型号共用接收器固件），vendor 接口
@@ -39,21 +82,92 @@ private enum HIDInputPermission {
 ///
 /// - `report[6]` = 电量百分比（0–100）
 /// - `report[7]` = 充电状态，0x10 / 0x11 表示充电中
+/// - `report[5]` = 连接状态，0x02 表示键盘未连接（此时电量字节无效）
 ///
 /// 协议逆向自 Linux 内核 `drivers/hid/hid-xinmeng.c`（2025 年合入），
 /// hidrec 采样确认：`13 0a 01 00 04 05 63 01` → 99% 放电，
-/// `13 0a 01 00 04 05 64 11` → 100% 充电。
+/// `13 0a 01 00 04 05 64 11` → 100% 充电。内核驱动没有处理断开状态
+/// （`online` 标志只置真），键盘关机时的占位报文会被当成真实电量——
+/// 这就是「键盘已关机却显示 1%」的来源，本实现对此做了过滤。
 ///
 /// 注意：`GetFeature(0x13)` 返回全零，只能被动监听 input report，
 /// 因此需要常驻会话（与罗技 HID++ 同样的后台线程模式）。
+/// 会话的读数状态机（与 HID 无关，可脱离硬件测试）。
+struct XinmengState {
+    var level: Int?
+    var charging = false
+    var lastReport: Date?
+    /// 键盘是否连接在接收器上（nil = 还没收到过报文，状态未知）
+    var keyboardOnline: Bool?
+    var startedAt = Date()
+
+    /// 曾经读到过读数后，超过这个时长没有任何报文就认为键盘已关机
+    static let offlineAfterSilence: TimeInterval = 300
+    /// 从没收到过报文时，只给这么长的等待窗口（在线时 15–30 秒就会来一条）
+    static let handshakeGrace: TimeInterval = 60
+    /// 报文间隔超过这个时长，读数标为「陈旧」（保留数值但界面置灰）
+    static let staleAfter: TimeInterval = 120
+
+    mutating func apply(report data: [UInt8], length: Int) {
+        switch XinmengReport.parse(data, length: length) {
+        case .battery(let capacity, let isCharging):
+            keyboardOnline = true
+            level = capacity
+            charging = isCharging
+            lastReport = Date()
+        case .offline:
+            // 收到报文说明接收器还插着，但键盘没连上：清掉读数，避免显示占位报文里的假电量
+            keyboardOnline = false
+            lastReport = Date()
+        case .ignored:
+            break
+        }
+    }
+
+    struct Reading {
+        var level: Int?
+        var charging: Bool
+        /// 明确收到「未连接」占位报文
+        var offline: Bool
+        /// 长时间没有任何报文
+        var silent: Bool
+        var stale: Bool
+        var detail: String
+        /// 键盘没连上：此时不该出现在设备列表里（接收器插着不代表键盘在线）
+        var disconnected: Bool { offline || silent }
+    }
+
+    func reading(now: Date = Date()) -> Reading {
+        let lastActivity = lastReport ?? startedAt
+        let grace = lastReport == nil ? XinmengState.handshakeGrace : XinmengState.offlineAfterSilence
+        let silent = now.timeIntervalSince(lastActivity) > grace
+        let offline = keyboardOnline == false
+        let disconnected = offline || silent
+        let detail: String
+        if offline {
+            detail = "接收器在线，键盘未连接（已关机或不在 2.4G 模式）"
+        } else if level == nil {
+            detail = "已找到接收器，等待电量报文"
+        } else {
+            detail = "厂商私有协议 0x13"
+        }
+        let stale = !disconnected && level != nil &&
+            (lastReport == nil || now.timeIntervalSince(lastReport!) > XinmengState.staleAfter)
+        return Reading(level: disconnected ? nil : level,
+                       charging: disconnected ? false : charging,
+                       offline: offline,
+                       silent: silent,
+                       stale: stale,
+                       detail: detail)
+    }
+}
+
 final class XinmengSession {
     private var manager: IOHIDManager?
     private var device: IOHIDDevice?
     private var buffer = [UInt8](repeating: 0, count: 64)
 
-    private(set) var level: Int?
-    private(set) var charging = false
-    private(set) var lastReport: Date?
+    private var state = XinmengState()
     private var receiverPID: Int = 0
     /// 会话创建失败的原因（nil 表示正常），用于诊断「为什么新盟设备没出现」
     private(set) var failureReason: String?
@@ -109,43 +223,45 @@ final class XinmengSession {
     }
 
     private func handle(report data: [UInt8], length: Int) {
-        guard data[0] == 0x13, length >= 8 else { return }   // 其余是心跳 / LED 状态报文
-        let capacity = Int(data[6])
-        // 0% 是键盘休眠时发出的占位报文，不是真实电量（内核驱动样例中真实电量恒 >= 1%）
-        guard (1...100).contains(capacity) else { return }
-        // 报文带校验和：最后一个字节 = 前面所有字节之和的低 8 位
-        // （内核 hidrec 21 字节样本验证：13 0a 01 00 04 05 63 01 …8b / …64 11…9c）
-        // macOS 上短报文（8 字节）不带校验和，跳过验证
-        if length > 8 {
-            let sum = data.prefix(length - 1).reduce(0 as UInt8) { $0 &+ $1 }
-            guard sum == data[length - 1] else { return }
-        }
-        level = capacity
-        charging = data[7] == 0x10 || data[7] == 0x11
-        lastReport = Date()
+        state.apply(report: data, length: length)
     }
+
+    /// 接收器插着、但键盘没连上（已关机 / 休眠 / 不在 2.4G 模式）
+    var isKeyboardDisconnected: Bool {
+        failureReason == nil && state.reading().disconnected
+    }
+
+    /// 接收器是否在线（即会话建立成功）
+    var isReceiverPresent: Bool { failureReason == nil }
 
     func snapshot() -> [DeviceBattery] {
         // 会话创建失败时不产出设备（避免展示一个必然无读数的假行）
         guard failureReason == nil else { return [] }
         let name = "新盟键盘（2.4G）"
+        let now = Date()
+        let reading = state.reading(now: now)
+        // 键盘没连上（关机 / 休眠 / 不在 2.4G 模式）时直接不产出这一行：
+        // 接收器插在电脑上并不等于键盘在线，列出来只会展示过时或虚假的电量
+        guard !reading.disconnected else { return [] }
+
         var extra = ["接收器": String(format: "VID 0x3554 PID 0x%04X", receiverPID)]
-        if let date = lastReport {
-            let seconds = Int(Date().timeIntervalSince(date))
+        if let date = state.lastReport {
+            let seconds = Int(now.timeIntervalSince(date))
             extra["报文"] = seconds < 60 ? "\(max(seconds, 1)) 秒前" : "\(seconds / 60) 分钟前"
         }
+
         return [DeviceBattery(
             id: "xinmeng-2.4g",
             name: name,
             kind: .keyboard,
             transport: .usb,
-            level: level,
-            charging: charging,
+            level: reading.level,
+            charging: reading.charging,
             connected: true,
             source: .vendorHID,
-            detail: level == nil ? "已找到接收器，等待电量报文" : "厂商私有协议 0x13",
-            lastUpdate: lastReport ?? Date(),
-            stale: level != nil && (lastReport == nil || Date().timeIntervalSince(lastReport!) > 300),
+            detail: reading.detail,
+            lastUpdate: state.lastReport ?? Date(),
+            stale: reading.stale,
             extra: extra
         )]
     }
@@ -198,7 +314,11 @@ final class XinmengProvider {
             }
             if self.session == nil { self.session = XinmengSession() }
             let devices = self.session?.failureReason == nil ? (self.session?.snapshot() ?? []) : []
-            let status = self.session?.failureReason
+            var status = self.session?.failureReason
+            // 键盘关机时设备行会被隐藏，这里说明原因，避免「接收器插着却看不到键盘」让人困惑
+            if status == nil, self.session?.isKeyboardDisconnected == true {
+                status = "接收器在线，但键盘未连接（已关机或休眠），已从列表隐藏"
+            }
             self.lastStatus = status
             DispatchQueue.main.async { completion(devices, status) }
         }
