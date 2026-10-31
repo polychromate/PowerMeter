@@ -394,12 +394,6 @@ struct AboutView: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
             Divider()
-            Text("数据来源")
-                .font(.system(size: 11, weight: .medium))
-            Text("· 系统蓝牙与 IOBluetooth 上报\n· HID BatteryPercent 系统属性\n· HID Battery Strength 标准直读\n· BLE 电池服务 0x180F\n· 独立设备插件（罗技、新盟等）")
-                .font(.system(size: 10.5))
-                .foregroundStyle(.secondary)
-            Divider()
             Text("运行状态")
                 .font(.system(size: 11, weight: .medium))
             if notes.isEmpty {
