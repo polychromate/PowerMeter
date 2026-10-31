@@ -1,59 +1,49 @@
 import Foundation
 import AppKit
 
-/// 命令行诊断模式：`PowerMeter --dump` 会在终端打印各数据源的抓取结果，
-/// 便于排查某台设备读不到电量的原因。
+/// 命令行诊断模式：打印内置数据源和独立插件的抓取结果。
+@MainActor
 enum DumpMode {
     static func run() {
         setvbuf(stdout, nil, _IOLBF, 0)
         print("PowerMeter \(AppVersion.text) 诊断模式")
         print(String(repeating: "=", count: 56))
 
-        var lines: [String] = []
-        var done = false
-
         let hid = HIDBatteryScanner.scan()
-        report(title: "通用 HID 属性（BatteryPercent）", devices: hid)
+        report(title: "通用 HID（系统属性 / Battery Strength）", devices: hid)
 
-        let logitech = LogitechProvider()
-        let xinmeng = XinmengProvider()
         var remaining = 3
-        logitech.snapshot { devices, fatal in
-            report(title: "罗技 HID++（接收器 / 直连）", devices: devices, extra: fatal)
-            remaining -= 1
-            if remaining == 0 { done = true }
-        }
-
-        xinmeng.snapshot { devices, status in
-            report(title: "厂商协议（新盟 2.4G 接收器 0x3554）", devices: devices, extra: status)
-            remaining -= 1
-            if remaining == 0 { done = true }
-        }
-
         BluetoothBatteryScanner.scan { devices, error in
             report(title: "系统蓝牙（system_profiler）", devices: devices, extra: error)
             remaining -= 1
-            if remaining == 0 { done = true }
         }
 
-        remaining += 1
+        let plugins = PluginManager()
+        plugins.reload()
+        if plugins.descriptors.isEmpty {
+            print("\n▸ 外部设备插件\n  （未安装；目录：\(PluginInstaller.pluginsDirectory().path)）")
+        }
+        plugins.snapshotAll { devices, statuses in
+            report(title: "外部设备插件（\(plugins.descriptors.count) 个）", devices: devices,
+                   extra: statuses.isEmpty ? nil : statuses.joined(separator: "；"))
+            remaining -= 1
+        }
+
         DispatchQueue.global(qos: .userInitiated).async {
             let result = IOBluetoothBatteryScanner.scan()
             DispatchQueue.main.async {
                 report(title: "蓝牙上报（IOBluetooth batteryPercent）", devices: result.0, extra: result.1)
                 remaining -= 1
-                if remaining == 0 { done = true }
             }
         }
 
-        let deadline = Date().addingTimeInterval(8)
-        while !done && Date() < deadline {
+        let deadline = Date().addingTimeInterval(14)
+        while remaining > 0 && Date() < deadline {
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         }
-        if !done { print("\n（部分数据源超时未返回）") }
+        if remaining > 0 { print("\n（部分数据源超时未返回）") }
         print(String(repeating: "=", count: 56))
-        print("提示：耳机类设备电量优先取 IOBluetooth 的 batteryPercent*（与系统设置一致）；\n     若所有通道都没有数据，才会显示「未知」。")
-        _ = lines
+        print("系统电量默认优先；标准 HID / BLE 直读兜底；高精度设备插件可声明优先。")
     }
 
     private static func report(title: String, devices: [DeviceBattery], extra: String? = nil) {

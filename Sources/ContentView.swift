@@ -7,6 +7,7 @@ struct ContentView: View {
     /// 离屏渲染时 ScrollView 内容不会绘制，用普通堆栈代替
     var scrollable = true
     @State private var showAbout = false
+    @State private var showPlugins = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -117,6 +118,13 @@ struct ContentView: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
             Spacer()
+            Button("插件") { showPlugins.toggle() }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .popover(isPresented: $showPlugins, arrowEdge: .bottom) {
+                    PluginsView(store: store)
+                }
             Button("关于") { showAbout.toggle() }
                 .buttonStyle(.plain)
                 .font(.system(size: 11))
@@ -197,6 +205,8 @@ struct DeviceRow: View {
         case .logitechHIDPP: return "HID++ 直读"
         case .systemProfiler: return "系统蓝牙上报"
         case .hidProperty: return "HID 属性"
+        case .hidReport: return "HID 标准电量直读"
+        case .devicePlugin: return "独立设备插件"
         case .bleGATT: return "BLE 电池服务"
         case .ioBluetooth: return "蓝牙上报"
         case .vendorHID: return "厂商私有协议"
@@ -386,7 +396,7 @@ struct AboutView: View {
             Divider()
             Text("数据来源")
                 .font(.system(size: 11, weight: .medium))
-            Text("· 罗技 HID++（接收器 / 蓝牙直连）\n· 系统蓝牙上报（AirPods 等）\n· HID 属性 BatteryPercent\n· IOBluetooth 私有电量（第三方耳机）\n· BLE 电池服务 0x180F\n· 厂商私有协议（新盟 2.4G 接收器）")
+            Text("· 系统蓝牙与 IOBluetooth 上报\n· HID BatteryPercent 系统属性\n· HID Battery Strength 标准直读\n· BLE 电池服务 0x180F\n· 独立设备插件（罗技、新盟等）")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
             Divider()
@@ -419,6 +429,117 @@ struct AboutView: View {
         }
         .padding(16)
         .frame(width: 300, alignment: .leading)
+    }
+}
+
+// MARK: - 插件管理
+
+struct PluginsView: View {
+    @ObservedObject var store: DeviceStore
+    @State private var installError: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            header
+            Divider()
+            pluginList
+            Divider()
+            actions
+        }
+        .padding(16)
+        .frame(width: 340, alignment: .leading)
+        .alert("插件安装失败", isPresented: Binding(
+            get: { installError != nil },
+            set: { if !$0 { installError = nil } }
+        )) {
+            Button("好") { installError = nil }
+        } message: {
+            Text(installError ?? "")
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("设备插件")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text("API v\(powerMeterPluginAPIVersion)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            Text("插件独立安装和升级，为新设备提供支持，无需更新主程序。")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var pluginList: some View {
+        if store.plugins.isEmpty {
+            Text("尚未安装设备插件")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 8)
+        } else {
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(store.plugins, id: \.id) { plugin in
+                        PluginRowView(plugin: plugin)
+                    }
+                }
+            }
+            .frame(maxHeight: 150)
+        }
+    }
+
+    private var actions: some View {
+        HStack {
+            Button("安装插件…", action: install)
+            Button("重新载入") { store.reloadPlugins() }
+            Spacer()
+            Button("插件目录") { store.openPluginDirectory() }
+        }
+        .font(.system(size: 10.5))
+    }
+
+    private func install() {
+        let panel = NSOpenPanel()
+        panel.title = "选择 PowerMeter 插件"
+        panel.message = "请选择 .pmplugin 插件包或其 zip 压缩包"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try store.installPlugin(from: url)
+        } catch {
+            installError = error.localizedDescription
+        }
+    }
+}
+
+struct PluginRowView: View {
+    let plugin: PluginDescriptor
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(plugin.name)
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+                Text("v\(plugin.version)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            Text(plugin.status)
+                .font(.system(size: 9.5))
+                .foregroundStyle(plugin.status == "已加载" ? Color.secondary : Color.red)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

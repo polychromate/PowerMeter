@@ -36,6 +36,7 @@ swiftc -O -swift-version 5 \
   -framework IOKit \
   -framework CoreBluetooth \
   -framework IOBluetooth \
+  -framework JavaScriptCore \
   -o "$APP/Contents/MacOS/$APP_NAME" \
   Sources/*.swift
 

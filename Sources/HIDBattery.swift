@@ -89,6 +89,7 @@ enum HIDBatteryScanner {
             // 通道一：IOKit 的 BatteryPercent 属性
             var level = int(device, "BatteryPercent").flatMap { (0...100).contains($0) ? $0 : nil }
             var detail = "HID BatteryPercent"
+            var source: BatterySource = .hidProperty
 
             // 通道二：HID 报告里的 Battery Strength 元素（蓝牙键鼠的主要通道）
             if level == nil {
@@ -98,6 +99,7 @@ enum HIDBatteryScanner {
                     if let value = readBatteryStrength(device) {
                         level = value
                         detail = "HID 电量元素 Battery Strength"
+                        source = .hidReport
                     }
                 }
             }
@@ -114,7 +116,7 @@ enum HIDBatteryScanner {
                 level: level,
                 charging: (flags & 0x01) != 0,
                 connected: true,
-                source: .hidProperty,
+                source: source,
                 detail: detail,
                 lastUpdate: Date()
             ))

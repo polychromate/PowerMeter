@@ -74,6 +74,8 @@ enum BatterySource: String, Codable {
     case logitechHIDPP = "HID++"
     case systemProfiler = "系统蓝牙"
     case hidProperty = "HID 属性"
+    case hidReport = "HID 直读"
+    case devicePlugin = "设备插件"
     case bleGATT = "BLE 电池服务"
     /// IOBluetooth 私有属性（batteryPercentSingle 等），macOS 设置里的耳机电量就来自这里
     case ioBluetooth = "蓝牙上报"
@@ -122,6 +124,9 @@ struct DeviceBattery: Identifiable, Equatable {
     /// true 表示本次刷新没读到，显示的是上一次的有效值
     var stale: Bool = false
     var extra: [String: String] = [:]
+    /// 外部插件身份与来源策略；内置数据源为空
+    var pluginID: String? = nil
+    var sourcePolicy: String? = nil
 
     /// 电池类型与判定依据（依据显示在悬浮提示里，方便纠正误判）
     var chemistry: BatteryChemistry = .unknown

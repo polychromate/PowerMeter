@@ -1,27 +1,26 @@
 import Foundation
 import SwiftUI
 
-/// 聚合所有数据源，产出统一的设备列表。
+/// 聚合内置数据源与外部插件，产出统一的设备列表。
 @MainActor
 final class DeviceStore: ObservableObject {
     @Published private(set) var devices: [DeviceBattery] = []
     @Published private(set) var lastRefresh: Date?
     @Published private(set) var isRefreshing = false
     @Published private(set) var notes: [String] = []
+    @Published private(set) var plugins: [PluginDescriptor] = []
 
-    private let logitech = LogitechProvider()
-    private let xinmeng = XinmengProvider()
+    private let pluginManager = PluginManager()
     private var refreshTimer: Timer?
     private var lastBLEScan: Date?
 
     // 各数据源的最近一次结果
-    private var logitechDevices: [DeviceBattery] = []
     private var bluetoothDevices: [DeviceBattery] = []
     private var hidDevices: [DeviceBattery] = []
     private var ioBluetoothDevices: [DeviceBattery] = []
-    private var vendorDevices: [DeviceBattery] = []
+    private var pluginDevices: [DeviceBattery] = []
 
-    // 上次有效电量缓存：devices 睡眠或暂时读不到时沿用，避免界面跳动
+    // 上次有效电量缓存：设备休眠或暂时读不到时沿用，避免界面跳动
     private var cache: [String: (level: Int, charging: Bool, date: Date)] = [:]
 
     private var pendingTasks = 0
@@ -32,6 +31,8 @@ final class DeviceStore: ObservableObject {
 
     init(enableBLE: Bool = true) {
         bleEnabled = enableBLE
+        pluginManager.reload()
+        plugins = pluginManager.descriptors
         guard enableBLE else { return }
         BLEScanner.shared.onUpdate = { [weak self] in
             self?.rebuild()
@@ -59,6 +60,24 @@ final class DeviceStore: ObservableObject {
         }
     }
 
+    func reloadPlugins() {
+        pluginManager.reload()
+        plugins = pluginManager.descriptors
+        refresh()
+    }
+
+    func installPlugin(from url: URL) throws {
+        try pluginManager.install(from: url)
+        plugins = pluginManager.descriptors
+        refresh()
+    }
+
+    func openPluginDirectory() {
+        let directory = PluginInstaller.pluginsDirectory()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(directory)
+    }
+
     func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
@@ -66,22 +85,11 @@ final class DeviceStore: ObservableObject {
         finishedTasks = 0
         notes = []
 
-        // 1. 通用 HID 属性（同步，毫秒级）
+        // 1. 通用 HID 系统属性与标准电量元素（同步，毫秒级）
         hidDevices = HIDBatteryScanner.scan()
         rebuild()
 
-        // 2. 罗技 HID++
-        pendingTasks += 1
-        logitech.snapshot { [weak self] devices, fatal in
-            guard let self = self else { return }
-            Task { @MainActor in
-                self.logitechDevices = devices
-                if let fatal = fatal { self.notes.append(fatal) }
-                self.finishTask()
-            }
-        }
-
-        // 3. 系统蓝牙
+        // 2. 系统蓝牙
         pendingTasks += 1
         BluetoothBatteryScanner.scan { [weak self] devices, error in
             guard let self = self else { return }
@@ -92,8 +100,8 @@ final class DeviceStore: ObservableObject {
             }
         }
 
-        // 3.5 蓝牙私有电量属性（第三方耳机电量，等同系统设置里的显示）
-        // 注意：IOBluetooth 的 pairedDevices() 内部会等主队列信号量，必须在后台线程调用
+        // 3. 系统已接收的蓝牙私有电量属性
+        // IOBluetooth 的 pairedDevices() 内部会等主队列信号量，必须在后台线程调用
         pendingTasks += 1
         DispatchQueue.global(qos: .userInitiated).async {
             let result = IOBluetoothBatteryScanner.scan()
@@ -105,18 +113,18 @@ final class DeviceStore: ObservableObject {
             }
         }
 
-        // 3.6 新盟 2.4G 接收器（厂商私有协议，被动监听 input report 0x13）
+        // 4. 独立安装的设备插件
         pendingTasks += 1
-        xinmeng.snapshot { [weak self] devices, status in
-            guard let self = self else { return }
+        pluginManager.snapshotAll { [weak self] devices, statuses in
             Task { @MainActor in
-                self.vendorDevices = devices
-                if let status = status { self.notes.append("新盟接收器：\(status)") }
+                guard let self = self else { return }
+                self.pluginDevices = devices
+                self.notes.append(contentsOf: statuses)
                 self.finishTask()
             }
         }
 
-        // 4. BLE 电池服务（每 5 分钟扫一次，避免耗电）
+        // 5. BLE 电池服务（每 5 分钟扫一次，避免耗电和干扰连接）
         if bleEnabled, lastBLEScan == nil || Date().timeIntervalSince(lastBLEScan!) > 300 {
             lastBLEScan = Date()
             BLEScanner.shared.scanOnce()
@@ -133,7 +141,7 @@ final class DeviceStore: ObservableObject {
     }
 
     private func rebuild() {
-        var all = logitechDevices + hidDevices + bluetoothDevices + ioBluetoothDevices + vendorDevices
+        var all = hidDevices + bluetoothDevices + ioBluetoothDevices + pluginDevices
         if bleEnabled {
             all += BLEScanner.shared.snapshot()
             if let status = BLEScanner.shared.statusText {
@@ -151,23 +159,29 @@ final class DeviceStore: ObservableObject {
         writeRuntimeSnapshot(devices)
     }
 
-    /// 同一设备可能出现在多个数据源（如罗技键盘同时出现在系统蓝牙列表）。
-    /// 按名称归一化合并，优先保留有读数、精度更高的来源。
+    private func sourceRank(_ device: DeviceBattery) -> Int {
+        if device.source == .devicePlugin {
+            return device.sourcePolicy == "fallback" ? 5 : 0
+        }
+        switch device.source {
+        case .logitechHIDPP: return 0
+        case .ioBluetooth: return 1
+        case .systemProfiler: return 2
+        case .hidProperty: return 3
+        case .hidReport, .bleGATT: return 4
+        case .vendorHID: return 5
+        case .devicePlugin: return 5
+        case .none: return 6
+        }
+    }
+
+    /// 同一设备可能出现在多个数据源。默认系统电量优先、通用直读兜底；
+    /// 声明 preferPlugin / pluginOnly 的设备插件优先于系统结果。
     private func merge(_ input: [DeviceBattery]) -> [DeviceBattery] {
         var groups: [String: [DeviceBattery]] = [:]
         for device in input {
             groups[normalize(device.name), default: []].append(device)
         }
-
-        let priority: [BatterySource: Int] = [
-            .logitechHIDPP: 0,
-            .hidProperty: 1,
-            .vendorHID: 2,
-            .bleGATT: 3,
-            .ioBluetooth: 4,
-            .systemProfiler: 5,
-            .none: 6
-        ]
 
         var merged: [DeviceBattery] = []
         for (_, group) in groups {
@@ -175,44 +189,49 @@ final class DeviceStore: ObservableObject {
                 let aHas = a.level != nil ? 0 : 1
                 let bHas = b.level != nil ? 0 : 1
                 if aHas != bHas { return aHas < bHas }
-                return (priority[a.source] ?? 9) < (priority[b.source] ?? 9)
+                let rank = sourceRank(a) - sourceRank(b)
+                if rank != 0 { return rank < 0 }
+                return a.lastUpdate > b.lastUpdate
             }
             var best = sorted[0]
-            // 若最佳来源没有读数，借用同组其它来源的读数
             if best.level == nil, let fallback = sorted.first(where: { $0.level != nil }) {
                 best.level = fallback.level
                 best.source = fallback.source
+                best.pluginID = fallback.pluginID
+                best.sourcePolicy = fallback.sourcePolicy
                 if best.detail == nil || best.detail!.contains("未") {
                     best.detail = fallback.detail
                 }
             }
-            // 补上其它来源的补充信息（例如蓝牙 RSSI、左右耳电量）
+
             let extraDetails = sorted.compactMap { $0.detail }.filter { !$0.isEmpty && $0 != best.detail }
             if best.level == nil, let hint = extraDetails.first(where: { $0.contains("未") }) {
                 best.detail = hint
             }
             best.connected = group.contains { $0.connected }
             if !best.charging { best.charging = group.contains { $0.charging } }
+            for device in group where device.id != best.id {
+                for (key, value) in device.extra where best.extra[key] == nil {
+                    best.extra[key] = value
+                }
+            }
 
-            // 缓存机制
+            let cacheKey = normalize(best.name)
             if let level = best.level {
-                cache[best.id] = (level, best.charging, Date())
+                cache[cacheKey] = (level, best.charging, Date())
                 best.stale = false
-            } else if let cached = cache[best.id], Date().timeIntervalSince(cached.date) < 900 {
+            } else if let cached = cache[cacheKey], Date().timeIntervalSince(cached.date) < 900 {
                 best.level = cached.level
                 best.charging = cached.charging
                 best.stale = true
             }
 
-            // 电池类型判定：放在缓存之后，保证用的是最终读数
             let verdict = BatteryClassifier.classify(best)
             best.chemistry = verdict.chemistry
             best.chemistryReason = verdict.reason
-
             merged.append(best)
         }
-        // 未连接的设备不进列表：接收器插着 / 蓝牙已配对都不等于设备在线，
-        // 列出来只会显示过时或虚假的电量
+        // 接收器插着 / 蓝牙已配对不等于设备在线
         return merged.filter { $0.connected }
     }
 
@@ -225,7 +244,6 @@ final class DeviceStore: ObservableObject {
         return text.trimmingCharacters(in: .whitespaces)
     }
 
-    /// 把最近一次扫描结果写到 Application Support，便于排查「为什么某设备没有电量」
     private func writeRuntimeSnapshot(_ devices: [DeviceBattery]) {
         let rows: [[String: Any]] = devices.map { device in
             [
@@ -236,6 +254,7 @@ final class DeviceStore: ObservableObject {
                 "chemistryReason": device.chemistryReason,
                 "transport": device.transport.rawValue,
                 "source": device.source.rawValue,
+                "pluginID": device.pluginID as Any,
                 "detail": device.detail ?? "",
                 "stale": device.stale
             ]
@@ -243,6 +262,7 @@ final class DeviceStore: ObservableObject {
         let payload: [String: Any] = [
             "updated": ISO8601DateFormatter().string(from: Date()),
             "notes": notes,
+            "plugins": plugins.map { ["id": $0.id, "version": $0.version, "status": $0.status] },
             "menuBar": [
                 "device": devices.menuBarCandidate?.name ?? "",
                 "level": devices.menuBarCandidate?.level as Any,
@@ -264,13 +284,10 @@ final class DeviceStore: ObservableObject {
 
     // MARK: - 菜单栏展示
 
-    /// 菜单栏展示的设备：优先「未充电的锂电池设备」中电量最低的一台，
-    /// 其次是充电中的锂电池设备，最后才轮到可更换电池设备。
     var menuBarDevice: DeviceBattery? {
         devices.menuBarCandidate
     }
 
-    /// 需要提醒充电的设备：锂电池 + 未充电 + 电量低于阈值
     var criticalDevices: [DeviceBattery] {
         devices.filter { $0.isCritical }
     }
