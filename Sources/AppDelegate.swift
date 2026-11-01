@@ -7,7 +7,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private let store = DeviceStore()
-    private var tileController: DesktopTileController?
     private var cancellables = Set<AnyCancellable>()
     private var eventMonitor: Any?
 
@@ -51,11 +50,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         updateStatusItem()
         store.startAutoRefresh(interval: 60)
-
-        // 桌面磁贴：双击磁贴回到面板，方便从磁贴直接操作
-        let controller = DesktopTileController(store: store)
-        controller.onOpenPanel = { [weak self] in self?.showPopover() }
-        tileController = controller
 
         // 便于截图与调试：--preview 启动后自动展开面板
         if CommandLine.arguments.contains("--preview") {

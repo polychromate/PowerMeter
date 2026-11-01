@@ -4,7 +4,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-blue)](https://github.com/polychromate/PowerMeter)
 [![Plugin API](https://img.shields.io/badge/plugin%20API-v1-green)](https://github.com/polychromate/PowerMeter-Plugins)
 
-**版本 0.5.0** · 2026-11-01
+**版本 0.5.1** · 2026-11-02
 
 菜单栏电量平台：优先复用 macOS 已经拿到的电量，读不到再用标准 HID / BLE 直读，
 仍读不到就交给**独立安装的设备插件**处理厂商私有协议。新增设备通常只需要装一个插件，
@@ -37,7 +37,7 @@
 
 ### App
 
-到 [Releases](https://github.com/polychromate/PowerMeter/releases) 下载 `PowerMeter-0.5.0.zip`，
+到 [Releases](https://github.com/polychromate/PowerMeter/releases) 下载 `PowerMeter-0.5.1.zip`，
 解压后把 `PowerMeter.app` 拖进「应用程序」。
 
 应用为自签名证书签名（`PowerMeter Dev`，无 Apple 开发者账号、未公证），
@@ -399,17 +399,6 @@ POWERMETER_PLUGIN_DIR=/path/to/myplugin \
   面板里却一个都搜不到，而且不报错。判断方法：`nm -u 二进制 | grep NSExtensionMain` 必须有输出。
   另外 appex 的 `CFBundleVersion` 每次构建要变，系统按它缓存小组件描述符，版本不变就一直用旧缓存。
 
-### 桌面贴片（可选，默认关闭）
-
-0.4.x 开发过程中做的自绘浮窗：不受系统网格限制，位置、尺寸、样式完全自己说了算，
-缺点是不进系统「编辑小组件」面板。0.5.0 起默认关闭，可在面板底部「磁贴」里打开。
-
-<img src="Resources/tile.png" width="200" alt="自绘贴片（多设备）"> <img src="Resources/tile-single.png" width="200" alt="自绘贴片（单设备）">
-
-- 尺寸 176 / 212 / 252 三档，外观毛玻璃 / 浅色 / 深色，层级「贴在桌面」或「始终置顶」。
-- 拖动移动、靠近屏幕边缘 20pt 自动吸附；位置按屏幕相对比例记忆，换分辨率后仍在原处。
-- 右键改设置，双击打开菜单栏面板。
-
 ---
 
 ## 八、命令与诊断
@@ -419,7 +408,6 @@ APP=/Applications/PowerMeter.app/Contents/MacOS/PowerMeter
 
 $APP --dump                  # 打印各通道原始抓取结果，排查设备为什么读不到
 $APP --snapshot out.png      # 离屏渲染界面截图（不需要屏幕录制权限）
-$APP --snapshot-tile t.png   # 离屏渲染桌面磁贴，多设备图 + t-single.png 单设备图
 $APP --install-plugin <路径>  # 安装 / 升级插件
 $APP --plugin-self-test      # 跑所有插件的 selfTest()，无硬件也能验解析逻辑
 ```
@@ -487,7 +475,7 @@ PowerMeter/
 ├── release.sh                # 编译 + 打包 app / 源码到 releases/
 ├── Info.plist                # LSUIElement 菜单栏应用 + 蓝牙用途说明 + 版本号
 ├── Sources/
-│   ├── main.swift            # 入口：--dump / --snapshot / --snapshot-tile / --install-plugin / --plugin-self-test
+│   ├── main.swift            # 入口：--dump / --snapshot / --install-plugin / --plugin-self-test
 │   ├── AppDelegate.swift     # 状态栏图标、菜单栏选机策略、弹窗、单实例保护
 │   ├── Models.swift          # 统一设备模型、来源枚举、电池类型
 │   ├── DeviceStore.swift     # 多源聚合、来源裁决、缓存、菜单栏候选
@@ -499,9 +487,8 @@ PowerMeter/
 │   ├── BLEScanner.swift          # BLE 电池服务 0x180F
 │   ├── BatteryClassifier.swift   # 锂电池 / 换电池判定
 │   ├── ContentView.swift         # SwiftUI 界面与插件管理面板
-│   ├── DesktopTile.swift         # 可选桌面贴片：窗口层级、拖动吸附、偏好、视图与设置
 │   ├── WidgetBridge.swift        # 把电量写进小组件容器（跨进程数据桥）
-│   └── SnapshotMode.swift        # ImageRenderer 离屏截图（面板 + 贴片）
+│   └── SnapshotMode.swift        # ImageRenderer 离屏截图
 ├── Widget/                   # 桌面小组件扩展（单独编译成 appex）
 │   ├── PowerMeterWidget.swift    # Widget 声明与 TimelineProvider
 │   ├── WidgetViews.swift         # 小 / 中 / 大三种尺寸的视图
@@ -530,11 +517,17 @@ PowerMeter/
 - **小组件要靠主程序供数据**。主程序退出后，桌面小组件停留在最后一次读到的电量，
   不会自己扫描——它没有蓝牙 / HID 权限，也不该有。
 - **小组件刷新受系统节流**，没有「每秒刷新」这种选项；主程序面板里的数字才是实时的。
-- 可选的自绘贴片跟随菜单栏常在，没有「仅在某桌面空间显示」的设置，开着就在所有空间可见。
 
 ---
 
 ## 十四、版本历史
+
+### 0.5.1 — 2026-11-02
+
+- 移除 0.5.0 里的自绘**桌面贴片**：连同 `Sources/DesktopTile.swift`（约 800 行）、
+  面板底部的「磁贴」入口和 `--snapshot-tile` 命令一起删掉。系统小组件跑通后它是冗余的，
+  两者显示的是同一份数据，而贴片不进系统「编辑小组件」面板。
+- 功能无其它变化，桌面小组件与 0.5.0 完全一致。
 
 ### 0.5.0 — 2026-11-01
 
