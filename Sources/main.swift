@@ -34,6 +34,12 @@ MainActor.assumeIsolated {
         exit(0)
     }
 
+    if let index = CommandLine.arguments.firstIndex(of: "--snapshot-tile") {
+        let path = index + 1 < CommandLine.arguments.count ? CommandLine.arguments[index + 1] : "tile.png"
+        TileSnapshotMode.run(path: path)
+        exit(0)
+    }
+
     let app = NSApplication.shared
     let delegate = AppDelegate()
     app.delegate = delegate

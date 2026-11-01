@@ -70,6 +70,22 @@ enum DeviceKind: String, Codable {
     }
 }
 
+extension DeviceKind {
+    /// SF Symbol 名称，面板与桌面磁贴共用
+    var symbolName: String {
+        switch self {
+        case .keyboard: return "keyboard"
+        case .mouse: return "computermouse"
+        case .headset: return "headphones"
+        case .trackpad: return "rectangle.and.hand.point.up.left"
+        case .gamepad: return "gamecontroller"
+        case .speaker: return "hifispeaker"
+        case .microphone: return "mic.fill"
+        case .other: return "dot.radiowaves.left.and.right"
+        }
+    }
+}
+
 enum BatterySource: String, Codable {
     case logitechHIDPP = "HID++"
     case systemProfiler = "系统蓝牙"

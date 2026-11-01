@@ -43,6 +43,48 @@ enum SnapshotMode {
     }
 }
 
+/// 离屏渲染桌面磁贴（`PowerMeter --snapshot-tile out.png`）。
+/// 毛玻璃是 NSVisualEffectView，ImageRenderer 画不出来，所以统一用深色主题出图。
+enum TileSnapshotMode {
+    @MainActor
+    static func run(path: String) {
+        guard let captured = SnapshotData.load(), !captured.isEmpty else {
+            print("没有可用的扫描结果：先把 App 跑起来，等它写出一份 last-scan.json")
+            return
+        }
+        let prefs = TilePreferences.shared
+
+        let multi = DeviceStore(enableBLE: false)
+        multi.applyPreview(captured)
+        write(TileRootView(store: multi, prefs: prefs, overrideTheme: .dark), to: path)
+
+        guard captured.count > 1 else { return }
+        let single = DeviceStore(enableBLE: false)
+        single.applyPreview([captured[0]])
+        let singlePath = path.replacingOccurrences(of: ".png", with: "") + "-single.png"
+        write(TileRootView(store: single, prefs: prefs, overrideTheme: .dark), to: singlePath)
+    }
+
+    @MainActor
+    private static func write<V: View>(_ view: V, to path: String) {
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else {
+            print("磁贴渲染失败")
+            return
+        }
+        do {
+            try png.write(to: URL(fileURLWithPath: path))
+            print("已写出 \(path)  (\(Int(image.size.width))×\(Int(image.size.height)))")
+        } catch {
+            print("写入失败：\(error)")
+        }
+    }
+}
+
 /// 读取 App 运行时写下的 last-scan.json（真实抓取结果），用于离屏渲染
 enum SnapshotData {
     private struct Payload: Decodable {

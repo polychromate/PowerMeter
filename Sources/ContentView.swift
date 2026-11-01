@@ -8,6 +8,7 @@ struct ContentView: View {
     var scrollable = true
     @State private var showAbout = false
     @State private var showPlugins = false
+    @State private var showTile = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -118,6 +119,13 @@ struct ContentView: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
             Spacer()
+            Button("磁贴") { showTile.toggle() }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .popover(isPresented: $showTile, arrowEdge: .bottom) {
+                    TileSettingsView(prefs: TilePreferences.shared)
+                }
             Button("插件") { showPlugins.toggle() }
                 .buttonStyle(.plain)
                 .font(.system(size: 11))
@@ -258,18 +266,7 @@ struct DeviceRow: View {
     static let chargingTint = Color(red: 0.13, green: 0.55, blue: 0.95)
     static let criticalTint = Color(red: 0.87, green: 0.26, blue: 0.24)
 
-    private var symbolName: String {
-        switch device.kind {
-        case .keyboard: return "keyboard"
-        case .mouse: return "computermouse"
-        case .headset: return "headphones"
-        case .trackpad: return "rectangle.and.hand.point.up.left"
-        case .gamepad: return "gamecontroller"
-        case .speaker: return "hifispeaker"
-        case .microphone: return "mic.fill"
-        case .other: return "dot.radiowaves.left.and.right"
-        }
-    }
+    private var symbolName: String { device.kind.symbolName }
 
     private var trailing: some View {
         HStack(spacing: 8) {

@@ -157,6 +157,8 @@ final class DeviceStore: ObservableObject {
         }
         notes = Array(NSOrderedSet(array: bannerSet)) as? [String] ?? bannerSet
         writeRuntimeSnapshot(devices)
+        // 桌面小组件只读文件，不自己扫硬件
+        WidgetBridge.write(devices: devices, primary: devices.menuBarCandidate)
     }
 
     private func sourceRank(_ device: DeviceBattery) -> Int {

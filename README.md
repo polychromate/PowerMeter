@@ -4,11 +4,13 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-blue)](https://github.com/polychromate/PowerMeter)
 [![Plugin API](https://img.shields.io/badge/plugin%20API-v1-green)](https://github.com/polychromate/PowerMeter-Plugins)
 
-**版本 0.4.1** · 2026-11-01
+**版本 0.5.0** · 2026-11-01
 
 菜单栏电量平台：优先复用 macOS 已经拿到的电量，读不到再用标准 HID / BLE 直读，
 仍读不到就交给**独立安装的设备插件**处理厂商私有协议。新增设备通常只需要装一个插件，
 不必更新 App。纯本地运行，不联网、不上传任何数据。
+
+0.5.0 起支持 **WidgetKit 桌面小组件**：电量直接摆在桌面上，和时钟、提醒、天气排在一起。
 
 ![界面](Resources/screenshot.png)
 
@@ -35,7 +37,7 @@
 
 ### App
 
-到 [Releases](https://github.com/polychromate/PowerMeter/releases) 下载 `PowerMeter-0.4.1.zip`，
+到 [Releases](https://github.com/polychromate/PowerMeter/releases) 下载 `PowerMeter-0.5.0.zip`，
 解压后把 `PowerMeter.app` 拖进「应用程序」。
 
 应用为自签名证书签名（`PowerMeter Dev`，无 Apple 开发者账号、未公证），
@@ -364,6 +366,50 @@ POWERMETER_PLUGIN_DIR=/path/to/myplugin \
 
 键按小写子串匹配设备名，重启 App 生效。
 
+### 桌面小组件
+
+0.5.0 新增。PowerMeter 提供 WidgetKit 桌面小组件，和时钟、提醒、天气放在同一套桌面网格里。
+
+<img src="Resources/widget-small.png" width="150" alt="小尺寸小组件"> <img src="Resources/widget-medium.png" width="320" alt="中尺寸小组件"> <img src="Resources/widget-list.png" width="320" alt="多设备列表">
+
+添加方式：**在桌面空白处右键 →「编辑小组件」→ 搜索 PowerMeter → 选尺寸拖到桌面**。
+
+| 尺寸 | 显示内容 |
+| --- | --- |
+| 小 | 一台主设备：环形电量 + 大号百分比 + 电池类型 |
+| 中 | 单设备时横向铺开；多设备时三行列表 |
+| 大 | 最多七台设备的列表 |
+
+数据流向：主程序每 60 秒扫一次，把结果写进共享的 `widget.json`；小组件只读这个文件，
+不自己碰蓝牙和 HID。所以**主程序得在跑**（菜单栏图标还在），否则小组件显示的是最后一次写入的数据。
+
+小组件的时间线每 90 秒问一次，系统会自行节流，实际刷新可能滞后几分钟——
+这是 WidgetKit 的规矩，不是程序偷懒。
+
+维护者注意三点：
+
+- 扩展 `com.chenge.PowerMeter.Widget` 装在 `PowerMeter.app/Contents/PlugIns/PowerMeterWidget.appex`，
+  带 `com.apple.security.app-sandbox`。**没有用 App Group**：自签名证书拿不到 App Group 容器，
+  所以改成主程序（无沙盒）把数据写进扩展自己的容器目录，扩展读自己的地盘不需要额外授权。
+- 签名**不能**对主程序用 `--deep`，它会把同一套参数套到嵌套代码上，抹掉扩展的 entitlement，
+  结果是扩展注册成功但加载失败。`build.sh` 里是先签 appex 再签主体。
+- **必须链接 `_NSExtensionMain` 作为入口点**（`swiftc` 加 `-Xlinker -e -Xlinker _NSExtensionMain`）。
+  手工编译的可执行文件默认入口是 Swift 的 `main`，于是 WidgetKit 的 `@main` 会落进 ExtensionFoundation，
+  它认不出这是小组件扩展，进程在回答 `getAllDescriptors` 之前就退出——现象是扩展注册得好好的、
+  面板里却一个都搜不到，而且不报错。判断方法：`nm -u 二进制 | grep NSExtensionMain` 必须有输出。
+  另外 appex 的 `CFBundleVersion` 每次构建要变，系统按它缓存小组件描述符，版本不变就一直用旧缓存。
+
+### 桌面贴片（可选，默认关闭）
+
+0.4.x 开发过程中做的自绘浮窗：不受系统网格限制，位置、尺寸、样式完全自己说了算，
+缺点是不进系统「编辑小组件」面板。0.5.0 起默认关闭，可在面板底部「磁贴」里打开。
+
+<img src="Resources/tile.png" width="200" alt="自绘贴片（多设备）"> <img src="Resources/tile-single.png" width="200" alt="自绘贴片（单设备）">
+
+- 尺寸 176 / 212 / 252 三档，外观毛玻璃 / 浅色 / 深色，层级「贴在桌面」或「始终置顶」。
+- 拖动移动、靠近屏幕边缘 20pt 自动吸附；位置按屏幕相对比例记忆，换分辨率后仍在原处。
+- 右键改设置，双击打开菜单栏面板。
+
 ---
 
 ## 八、命令与诊断
@@ -373,6 +419,7 @@ APP=/Applications/PowerMeter.app/Contents/MacOS/PowerMeter
 
 $APP --dump                  # 打印各通道原始抓取结果，排查设备为什么读不到
 $APP --snapshot out.png      # 离屏渲染界面截图（不需要屏幕录制权限）
+$APP --snapshot-tile t.png   # 离屏渲染桌面磁贴，多设备图 + t-single.png 单设备图
 $APP --install-plugin <路径>  # 安装 / 升级插件
 $APP --plugin-self-test      # 跑所有插件的 selfTest()，无硬件也能验解析逻辑
 ```
@@ -440,7 +487,7 @@ PowerMeter/
 ├── release.sh                # 编译 + 打包 app / 源码到 releases/
 ├── Info.plist                # LSUIElement 菜单栏应用 + 蓝牙用途说明 + 版本号
 ├── Sources/
-│   ├── main.swift            # 入口：--dump / --snapshot / --install-plugin / --plugin-self-test
+│   ├── main.swift            # 入口：--dump / --snapshot / --snapshot-tile / --install-plugin / --plugin-self-test
 │   ├── AppDelegate.swift     # 状态栏图标、菜单栏选机策略、弹窗、单实例保护
 │   ├── Models.swift          # 统一设备模型、来源枚举、电池类型
 │   ├── DeviceStore.swift     # 多源聚合、来源裁决、缓存、菜单栏候选
@@ -452,7 +499,15 @@ PowerMeter/
 │   ├── BLEScanner.swift          # BLE 电池服务 0x180F
 │   ├── BatteryClassifier.swift   # 锂电池 / 换电池判定
 │   ├── ContentView.swift         # SwiftUI 界面与插件管理面板
-│   └── SnapshotMode.swift        # ImageRenderer 离屏截图
+│   ├── DesktopTile.swift         # 可选桌面贴片：窗口层级、拖动吸附、偏好、视图与设置
+│   ├── WidgetBridge.swift        # 把电量写进小组件容器（跨进程数据桥）
+│   └── SnapshotMode.swift        # ImageRenderer 离屏截图（面板 + 贴片）
+├── Widget/                   # 桌面小组件扩展（单独编译成 appex）
+│   ├── PowerMeterWidget.swift    # Widget 声明与 TimelineProvider
+│   ├── WidgetViews.swift         # 小 / 中 / 大三种尺寸的视图
+│   ├── WidgetModel.swift         # 共享数据读取与展示辅助
+│   ├── Info.plist                # widgetkit-extension 声明
+│   └── PowerMeterWidget.entitlements  # 沙盒权限
 ├── Resources/                # 图标与截图
 └── releases/                 # 各版本产物（不进 git）
 ```
@@ -472,10 +527,25 @@ PowerMeter/
   目前只能靠 JavaScript 在 HID 报文层面实现。
 - 设备身份仍以**规范化设备名**为合并键。同名设备（两台完全一样的键盘）可能被合并。
 - 只允许运行一个实例（HID 设备通常独占，多开会导致读不到电量）。
+- **小组件要靠主程序供数据**。主程序退出后，桌面小组件停留在最后一次读到的电量，
+  不会自己扫描——它没有蓝牙 / HID 权限，也不该有。
+- **小组件刷新受系统节流**，没有「每秒刷新」这种选项；主程序面板里的数字才是实时的。
+- 可选的自绘贴片跟随菜单栏常在，没有「仅在某桌面空间显示」的设置，开着就在所有空间可见。
 
 ---
 
 ## 十四、版本历史
+
+### 0.5.0 — 2026-11-01
+
+- 新增 **WidgetKit 桌面小组件**：电量直接显示在桌面上，和时钟、提醒、天气排在同一套网格里。
+  - 三种尺寸：小 = 单设备环形电量；中 = 单设备横向版 / 三行列表；大 = 最多七台列表。
+  - 自签名也能用：扩展带沙盒 entitlement，主程序把数据写进扩展容器，绕开 App Group 限制。
+  - 新增 `Sources/WidgetBridge.swift` 负责跨进程投递数据，小组件时间线每 90 秒取一次（系统会节流）。
+- 新增可选的自绘**桌面贴片**（默认关闭）：不依赖系统小组件，位置样式更自由，
+  支持三档尺寸、三种外观、拖动吸附与位置记忆，右键改设置。可在面板底部「磁贴」打开。
+- 新增 `--snapshot-tile` 命令，可离屏渲染自绘贴片。
+- `DeviceKind` 的图标映射抽成 `symbolName`，面板、贴片与小组件共用同一套。
 
 ### 0.4.1 — 2026-11-01
 
